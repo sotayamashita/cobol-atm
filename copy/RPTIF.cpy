@@ -29,4 +29,16 @@
       *    -- FOOTER 用
            05  RPT-IN-DIFF-CNT         PIC 9(05).
            05  RPT-IN-PENDING-CNT      PIC 9(05).
+      *    -- 係員対応が要るかは締めの判断基準そのものなので、
+      *    -- 帳票側で件数から導かず、呼出元が決めて渡す。
+      *    -- 件数がゼロでも要対応になる場合がある (検出打ち切り等)。
+           05  RPT-IN-ACTION-REQUIRED  PIC X(01).
+               88  RPT-ACTION-YES              VALUE 'Y'.
+      *    -- 現金の実査が行われたか。未実施を「差異なし」と書くと
+      *    -- 実施して問題なしと読めてしまうため、区別して出す。
+           05  RPT-IN-CASH-COUNTED     PIC X(01).
+               88  RPT-CASH-COUNTED            VALUE 'Y'.
+      *    -- 検出件数が上限に達して打ち切ったか
+           05  RPT-IN-TRUNCATED        PIC X(01).
+               88  RPT-TRUNCATED               VALUE 'Y'.
            05  RPT-OUT-RETCODE         PIC S9(04) COMP.

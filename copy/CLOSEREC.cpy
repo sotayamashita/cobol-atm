@@ -16,11 +16,16 @@
       *    -- 最後に締め終えた営業日
            05  CLS-LAST-CLOSED-DATE    PIC 9(08).
            05  CLS-LAST-CLOSED-TS      PIC 9(14).
+      *    -- 実行中フラグが残っている状態が、そのまま「前回が異常
+      *    -- 終了した」ことを表す。別に中断状態を設けても、書き込む
+      *    -- 前に落ちる以上は立てられないため意味を持たない。
            05  CLS-STATUS              PIC X(01).
                88  CLS-ST-IDLE                 VALUE 'I'.
                88  CLS-ST-RUNNING              VALUE 'R'.
-               88  CLS-ST-ABORTED              VALUE 'A'.
       *    -- 直近の締めで検出した差異の件数。0 でなければ係員対応
            05  CLS-LAST-DIFF-CNT       PIC 9(05).
            05  CLS-LAST-PENDING-CNT    PIC 9(05).
-           05  FILLER                  PIC X(87).
+      *    -- 端末内で一意な連番。取引 ID とセッション ID の出どころ。
+      *    -- ファイルに持つので電源断や再起動をまたいで続く。
+           05  CLS-LAST-SEQ            PIC 9(09).
+           05  FILLER                  PIC X(78).

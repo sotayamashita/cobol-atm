@@ -36,28 +36,14 @@
        IDENTIFICATION DIVISION.
        PROGRAM-ID. ATMDAY.
 
-       ENVIRONMENT DIVISION.
-       INPUT-OUTPUT SECTION.
-       FILE-CONTROL.
-           SELECT CLOSE-FILE ASSIGN TO 'data/atmclose.dat'
-               ORGANIZATION IS INDEXED
-               ACCESS MODE IS RANDOM
-               RECORD KEY IS CLS-ATM-ID
-               FILE STATUS IS WS-CLOSE-STATUS.
-
        DATA DIVISION.
-       FILE SECTION.
-       FD  CLOSE-FILE.
-       COPY 'CLOSEREC.cpy'.
-
        WORKING-STORAGE SECTION.
-       01  WS-CLOSE-STATUS             PIC X(02) VALUE '00'.
-
        01  WS-CONST.
       *    -- 未決着の取引を保持する上限。1 営業日の取引数を超える
       *    -- ことはないが、溢れた場合は帳票で明示する。
            05  WS-MAX-OPEN-TXN         PIC S9(04) COMP VALUE 500.
            05  WS-MAX-RECON            PIC S9(04) COMP VALUE 500.
+           05  WS-TXN-TYPE-CNT         PIC S9(04) COMP VALUE 5.
 
       *    -- EJ 走査中、まだ E が来ていない取引
        01  WS-OPEN-TXN-TABLE.
@@ -72,25 +58,38 @@
            05  WS-RECON-ENTRY OCCURS 500 TIMES PIC X(128).
 
       *    -- 取引種別ごとの集計
+      *    -- 取引種別の一覧は 1 箇所で持つ。初期化と集計と帳票で
+      *    -- 別々に並べると、種別を増やすたびに三箇所直すことになる。
+       01  WS-SUM-TYPES.
+           05  FILLER PIC X(02) VALUE 'IQ'.
+           05  FILLER PIC X(02) VALUE 'WD'.
+           05  FILLER PIC X(02) VALUE 'DP'.
+           05  FILLER PIC X(02) VALUE 'TR'.
+           05  FILLER PIC X(02) VALUE 'PC'.
+       01  WS-SUM-TYPE-LIST REDEFINES WS-SUM-TYPES.
+           05  WS-SUM-TYPE OCCURS 5 TIMES PIC X(02).
+
        01  WS-SUMMARY-TABLE.
            05  WS-SUM-ENTRY OCCURS 5 TIMES.
-               10  WS-SUM-TYPE         PIC X(02).
                10  WS-SUM-CNT          PIC 9(07).
                10  WS-SUM-AMT          PIC S9(13)V99.
 
        01  WS-WORK.
            05  WS-I                    PIC S9(04) COMP VALUE ZERO.
-           05  WS-J                    PIC S9(04) COMP VALUE ZERO.
            05  WS-FOUND                PIC S9(04) COMP VALUE ZERO.
            05  WS-DIFF-CNT             PIC 9(05) VALUE ZERO.
            05  WS-PENDING-CNT          PIC 9(05) VALUE ZERO.
            05  WS-OVERFLOW             PIC X(01) VALUE 'N'.
            05  WS-ABORT                PIC X(01) VALUE 'N'.
-      *    -- 実査枚数。係員入力の口。現状は帳簿値で埋める。
+           05  WS-ACTION               PIC X(01) VALUE 'N'.
+      *    -- 実査枚数と、それが入力されたか。入力経路が無い間は
+      *    -- 'N' のままで、突合そのものを行わない。
+           05  WS-COUNTED              PIC X(01) VALUE 'N'.
            05  WS-IN-COUNT OCCURS 4 TIMES PIC 9(05).
-      *    -- EJ の日付部。除算の結果をそのまま比較すると小数が残って
-      *    -- 一致しないため、整数項目へ落としてから突き合わせる。
-           05  WS-JRNL-DATE            PIC 9(08) VALUE ZERO.
+      *    -- 当日の現金増減。CASH-PARM は呼出のたびに上書きされる
+      *    -- 引数域なので、後で帳票に出す値はここへ退避する。
+           05  WS-DISPENSED            PIC S9(13)V99 VALUE ZERO.
+           05  WS-DEPOSITED            PIC S9(13)V99 VALUE ZERO.
 
       *    -- 走査中の 1 レコードを EJ のレイアウトで読むための像
        COPY 'JRNLREC.cpy'.
@@ -102,7 +101,7 @@
        COPY 'JRNLIF.cpy'.
        COPY 'CASHIF.cpy'.
        COPY 'RPTIF.cpy'.
-       COPY 'CALIF.cpy'.
+       COPY 'CLSIF.cpy'.
 
        01  WS-DATETIME.
            05  WS-CURRENT-DATE.
@@ -145,66 +144,44 @@
            DISPLAY '=== 日次締め 端末 ' CN-ATM-ID
                    ' 営業日 ' SESS-BUSINESS-DATE ' ==='
 
-           OPEN I-O CLOSE-FILE
-           IF WS-CLOSE-STATUS NOT = '00'
-               DISPLAY '*** 締め状態を読めません。中止します。'
+           SET CLS-FN-CHECK TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION
+           IF CLS-OUT-RETCODE NOT = RC-OK
+               PERFORM SHOW-CLOSE-ERROR
                MOVE 'Y' TO WS-ABORT
                GO TO INIT-EXIT
            END-IF
 
-           MOVE CN-ATM-ID TO CLS-ATM-ID
-           READ CLOSE-FILE
-               INVALID KEY
-                   DISPLAY '*** 締め状態が未登録です。中止します。'
-                   MOVE 'Y' TO WS-ABORT
-                   GO TO INIT-EXIT
-           END-READ
-
-           PERFORM CHECK-CLOSABLE
-           IF WS-ABORT = 'Y'
-               GO TO INIT-EXIT
-           END-IF
-
-           SET CLS-ST-RUNNING TO TRUE
-           REWRITE CLOSE-RECORD
-           END-REWRITE.
+           SET CLS-FN-START TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION.
        INIT-EXIT.
            EXIT.
 
       *----------------------------------------------------------------
-      * 締めてよい状態かを見る。同じ営業日の再実行と、前回の異常終了
-      * が残っている状態を弾く。どちらも自動で進めてはいけない。
+      * 締められない理由を係員に伝える。判定そのものは ATMCLS が持つ。
       *----------------------------------------------------------------
-       CHECK-CLOSABLE SECTION.
-       CHK-START.
-           EVALUATE TRUE
-               WHEN CLS-ST-RUNNING
-                   DISPLAY '  [' EC-CLOSE-IN-PROGRESS
-                           '] 締めが実行中です。'
-                           '前回が異常終了した場合は係員が解除してください。'
-                   MOVE 'Y' TO WS-ABORT
-               WHEN CLS-ST-ABORTED
-                   DISPLAY '  [' EC-CLOSE-ABORTED
-                           '] 前回の締めが中断しています。'
-                           '係員の確認が必要です。'
-                   MOVE 'Y' TO WS-ABORT
-               WHEN CLS-LAST-CLOSED-DATE >= SESS-BUSINESS-DATE
-                   DISPLAY '  [' EC-ALREADY-CLOSED
+       SHOW-CLOSE-ERROR SECTION.
+       SCE-START.
+           EVALUATE CLS-OUT-ERROR-CODE
+               WHEN EC-ALREADY-CLOSED
+                   DISPLAY '  [' CLS-OUT-ERROR-CODE
                            '] この営業日は締め済みです ('
-                           CLS-LAST-CLOSED-DATE ')。'
-                   MOVE 'Y' TO WS-ABORT
+                           CLS-OUT-LAST-CLOSED ')。'
+               WHEN EC-CLOSE-IN-PROGRESS
+                   DISPLAY '  [' CLS-OUT-ERROR-CODE
+                           '] 締めが実行中です。前回が異常終了した'
+                           '場合は係員が解除してください。'
+               WHEN OTHER
+                   DISPLAY '  [' CLS-OUT-ERROR-CODE
+                           '] 締め状態を確認できません。'
            END-EVALUATE.
-       CHK-EXIT.
+       SCE-EXIT.
            EXIT.
 
        INIT-SUMMARY SECTION.
        IS-START.
-           MOVE 'IQ' TO WS-SUM-TYPE(1)
-           MOVE 'WD' TO WS-SUM-TYPE(2)
-           MOVE 'DP' TO WS-SUM-TYPE(3)
-           MOVE 'TR' TO WS-SUM-TYPE(4)
-           MOVE 'PC' TO WS-SUM-TYPE(5)
-           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 5
+           PERFORM VARYING WS-I FROM 1 BY 1
+                   UNTIL WS-I > WS-TXN-TYPE-CNT
                MOVE ZERO TO WS-SUM-CNT(WS-I)
                MOVE ZERO TO WS-SUM-AMT(WS-I)
            END-PERFORM.
@@ -245,8 +222,7 @@
        CLASSIFY-JOURNAL-RECORD SECTION.
        CJR-START.
       *    -- 当営業日以外のレコードは対象外。EJ は日を跨いで残る。
-           COMPUTE WS-JRNL-DATE = JRNL-TIMESTAMP / 1000000
-           IF WS-JRNL-DATE NOT = SESS-BUSINESS-DATE
+           IF JRNL-TIMESTAMP (1:8) NOT = SESS-BUSINESS-DATE
                GO TO CJR-EXIT
            END-IF
 
@@ -279,7 +255,9 @@
        POP-START.
            PERFORM FIND-OPEN-TXN
            IF WS-FOUND > ZERO
-               PERFORM REMOVE-OPEN-TXN
+      *        -- 詰め直さず消費済みの印を付ける。表は集合であって
+      *        -- 順序に意味がないため、配列シフトは要らない。
+               MOVE SPACES TO WS-OPEN-TXN-ID(WS-FOUND)
            END-IF
 
            IF JRNL-RESULT = 'S'
@@ -300,17 +278,6 @@
        FIND-EXIT.
            EXIT.
 
-       REMOVE-OPEN-TXN SECTION.
-       REM-START.
-           PERFORM VARYING WS-J FROM WS-FOUND BY 1
-                   UNTIL WS-J >= WS-OPEN-CNT
-               MOVE WS-OPEN-TXN-ID(WS-J + 1) TO WS-OPEN-TXN-ID(WS-J)
-               MOVE WS-OPEN-RECORD(WS-J + 1) TO WS-OPEN-RECORD(WS-J)
-           END-PERFORM
-           SUBTRACT 1 FROM WS-OPEN-CNT.
-       REM-EXIT.
-           EXIT.
-
       *----------------------------------------------------------------
       * 取消 (R) レコード。取消自体が失敗していれば勘定が合っていない
       * ので、係員対応として拾う。
@@ -329,7 +296,8 @@
 
        ADD-TO-SUMMARY SECTION.
        ATS-START.
-           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 5
+           PERFORM VARYING WS-I FROM 1 BY 1
+                   UNTIL WS-I > WS-TXN-TYPE-CNT
                IF WS-SUM-TYPE(WS-I) = JRNL-TXN-TYPE
                    ADD 1 TO WS-SUM-CNT(WS-I)
                    ADD JRNL-AMOUNT TO WS-SUM-AMT(WS-I)
@@ -346,9 +314,15 @@
        COLLECT-PENDING SECTION.
        CP-START.
            PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > WS-OPEN-CNT
+               IF WS-OPEN-TXN-ID(WS-I) = SPACES
+                   EXIT PERFORM CYCLE
+               END-IF
                MOVE WS-OPEN-RECORD(WS-I) TO JRNL-RECORD
                MOVE SPACES TO RECON-RECORD
-               IF JRNL-TRACE-NO NOT = SPACES
+      *        -- 成否不明かどうかは EJ が明示している事実で決める。
+      *        -- 追跡番号は正常に着金した振込にも付くので、有無では
+      *        -- 判別にならない。
+               IF JRNL-ERROR-CODE = EC-ZENGIN-TIMEOUT
                    SET RCN-TP-ZENGIN-UNKNOWN TO TRUE
                ELSE
                    SET RCN-TP-PENDING TO TRUE
@@ -401,7 +375,15 @@
                GO TO RC-EXIT
            END-IF
 
+      *    -- 引数域は次の呼出で上書きされるので、帳票に出す値は
+      *    -- ここで退避しておく。
+           MOVE CASH-OUT-DISPENSED TO WS-DISPENSED
+           MOVE CASH-OUT-DEPOSITED TO WS-DEPOSITED
+
            PERFORM READ-COUNTED-NOTES
+           IF WS-COUNTED NOT = 'Y'
+               GO TO RC-EXIT
+           END-IF
 
            PERFORM VARYING WS-I FROM 1 BY 1
                    UNTIL WS-I > CN-CASSETTE-CNT
@@ -420,16 +402,19 @@
            EXIT.
 
       *----------------------------------------------------------------
-      * 実査枚数の取得。本来は係員が装置から数えた枚数を入力する。
-      * その経路がまだ無いので帳簿値をそのまま使い、差異ゼロになる。
-      * 係員操作パネルを作る際はここを差し替える。
+      * 実査枚数の取得。係員が装置から数えた枚数を入力する経路が
+      * まだ無いので、未入力のまま返す。
+      *
+      * 帳簿値をそのまま実査値として埋めてはいけない。比較が必ず
+      * 一致して差異ゼロになり、実査していないのに「実施して問題
+      * なし」と読める帳票が出てしまう。未実施は未実施として残す。
+      *
+      * 係員操作パネルを作る際は、ここで入力値を受け取って
+      * WS-COUNTED に 'Y' を立てれば、以降の突合が有効になる。
       *----------------------------------------------------------------
        READ-COUNTED-NOTES SECTION.
        RCN-START.
-           PERFORM VARYING WS-I FROM 1 BY 1
-                   UNTIL WS-I > CN-CASSETTE-CNT
-               MOVE CASH-TH-CNT(WS-I) TO WS-IN-COUNT(WS-I)
-           END-PERFORM.
+           MOVE 'N' TO WS-COUNTED.
        RCN-EXIT.
            EXIT.
 
@@ -453,8 +438,12 @@
            PERFORM WRITE-CASH-LINES
            PERFORM WRITE-DETAIL-LINES
 
+           PERFORM DECIDE-ACTION
            MOVE WS-DIFF-CNT    TO RPT-IN-DIFF-CNT
            MOVE WS-PENDING-CNT TO RPT-IN-PENDING-CNT
+           MOVE WS-ACTION      TO RPT-IN-ACTION-REQUIRED
+           MOVE WS-COUNTED     TO RPT-IN-CASH-COUNTED
+           MOVE WS-OVERFLOW    TO RPT-IN-TRUNCATED
            SET RPT-FN-FOOTER TO TRUE
            CALL 'ATMRPT' USING RPT-PARM ATM-SESSION
 
@@ -463,10 +452,27 @@
        WR-EXIT.
            EXIT.
 
+      *----------------------------------------------------------------
+      * 係員対応が要るかの判断。締めの基準そのものなので、帳票側に
+      * 件数から導かせない。検出を打ち切った場合は、件数がゼロでも
+      * 記載漏れがあるので要対応とする。
+      *----------------------------------------------------------------
+       DECIDE-ACTION SECTION.
+       DA-START.
+           MOVE 'N' TO WS-ACTION
+           IF WS-DIFF-CNT > ZERO
+              OR WS-PENDING-CNT > ZERO
+              OR WS-OVERFLOW = 'Y'
+               MOVE 'Y' TO WS-ACTION
+           END-IF.
+       DA-EXIT.
+           EXIT.
+
        WRITE-SUMMARY-LINES SECTION.
        WSL-START.
-           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 5
-               PERFORM SET-SUMMARY-LABEL
+           PERFORM VARYING WS-I FROM 1 BY 1
+                   UNTIL WS-I > WS-TXN-TYPE-CNT
+               MOVE WS-SUM-TYPE(WS-I) TO RPT-IN-LABEL
                MOVE WS-SUM-CNT(WS-I) TO RPT-IN-COUNT
                MOVE WS-SUM-AMT(WS-I) TO RPT-IN-AMOUNT
                SET RPT-FN-SUMMARY TO TRUE
@@ -475,35 +481,27 @@
        WSL-EXIT.
            EXIT.
 
-       SET-SUMMARY-LABEL SECTION.
-       SSL-START.
-           EVALUATE WS-SUM-TYPE(WS-I)
-               WHEN 'IQ' MOVE '残高照会'     TO RPT-IN-LABEL
-               WHEN 'WD' MOVE 'お引出し'     TO RPT-IN-LABEL
-               WHEN 'DP' MOVE 'お預入れ'     TO RPT-IN-LABEL
-               WHEN 'TR' MOVE 'お振込み'     TO RPT-IN-LABEL
-               WHEN 'PC' MOVE '暗証番号変更' TO RPT-IN-LABEL
-               WHEN OTHER MOVE SPACES        TO RPT-IN-LABEL
-           END-EVALUATE.
-       SSL-EXIT.
-           EXIT.
-
       *    -- 現金の動き。金種別の残枚数ではなく当日の増減を出す。
       *    -- 枚数は差異があったときだけ明細に出る。
        WRITE-CASH-LINES SECTION.
        WCL-START.
            MOVE '払出額 (当日)' TO RPT-IN-LABEL
-           MOVE ZERO                 TO RPT-IN-COUNT
-           MOVE CASH-OUT-DISPENSED   TO RPT-IN-AMOUNT
-           SET RPT-FN-SUMMARY TO TRUE
-           CALL 'ATMRPT' USING RPT-PARM ATM-SESSION
+           MOVE WS-DISPENSED    TO RPT-IN-AMOUNT
+           PERFORM WRITE-AMOUNT-LINE
 
            MOVE '収納額 (当日)' TO RPT-IN-LABEL
-           MOVE ZERO                 TO RPT-IN-COUNT
-           MOVE CASH-OUT-DEPOSITED   TO RPT-IN-AMOUNT
+           MOVE WS-DEPOSITED    TO RPT-IN-AMOUNT
+           PERFORM WRITE-AMOUNT-LINE.
+       WCL-EXIT.
+           EXIT.
+
+      *    -- 件数を持たない金額だけの集計行
+       WRITE-AMOUNT-LINE SECTION.
+       WAL-START.
+           MOVE ZERO TO RPT-IN-COUNT
            SET RPT-FN-SUMMARY TO TRUE
            CALL 'ATMRPT' USING RPT-PARM ATM-SESSION.
-       WCL-EXIT.
+       WAL-EXIT.
            EXIT.
 
        WRITE-DETAIL-LINES SECTION.
@@ -534,24 +532,25 @@
 
        FINISH-NORMAL SECTION.
        FN-START.
-           MOVE SESS-BUSINESS-DATE TO CLS-LAST-CLOSED-DATE
-           MOVE SESS-TIMESTAMP     TO CLS-LAST-CLOSED-TS
-           MOVE WS-DIFF-CNT        TO CLS-LAST-DIFF-CNT
-           MOVE WS-PENDING-CNT     TO CLS-LAST-PENDING-CNT
-           SET  CLS-ST-IDLE TO TRUE
-           REWRITE CLOSE-RECORD
-           END-REWRITE
-           CLOSE CLOSE-FILE
+           MOVE WS-DIFF-CNT    TO CLS-IN-DIFF-CNT
+           MOVE WS-PENDING-CNT TO CLS-IN-PENDING-CNT
+           SET  CLS-FN-FINISH TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION
+           SET  CLS-FN-CLOSE TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION
 
            DISPLAY '  取引集計 : ' WS-SUM-CNT(2) ' 出金 / '
                    WS-SUM-CNT(3) ' 入金 / ' WS-SUM-CNT(4) ' 振込'
            DISPLAY '  不確定取引: ' WS-PENDING-CNT ' 件'
-           DISPLAY '  現金差異  : ' WS-DIFF-CNT ' 件'
-           IF WS-OVERFLOW = 'Y'
-               DISPLAY '*** 検出件数が上限を超えました。'
-                       '帳票は一部のみです。'
+           IF WS-COUNTED = 'Y'
+               DISPLAY '  現金差異  : ' WS-DIFF-CNT ' 件'
+           ELSE
+               DISPLAY '  現金実査  : 未実施 (実査枚数の入力経路なし)'
            END-IF
-           IF WS-DIFF-CNT > ZERO OR WS-PENDING-CNT > ZERO
+           IF WS-OVERFLOW = 'Y'
+               DISPLAY '*** 検出件数が上限に達し、明細を打ち切りました。'
+           END-IF
+           IF WS-ACTION = 'Y'
                DISPLAY '*** 係員の確認が必要です。'
                        ' 帳票 data/atmrpt.txt を参照してください。'
            ELSE
@@ -564,9 +563,8 @@
       *    -- 状態はそのまま。係員が原因を解いてから再実行する。
        FINISH-ABORTED SECTION.
        FA-START.
-           IF WS-CLOSE-STATUS = '00'
-               CLOSE CLOSE-FILE
-           END-IF
+           SET CLS-FN-CLOSE TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION
            DISPLAY '  締め処理を行いませんでした。'.
        FA-EXIT.
            EXIT.

@@ -63,6 +63,7 @@
        COPY 'JRNLIF.cpy'.
        COPY 'CALIF.cpy'.
        COPY 'ZGNIF.cpy'.
+       COPY 'CLSIF.cpy'.
 
        PROCEDURE DIVISION.
 
@@ -112,6 +113,8 @@
            CALL 'ATMCASH' USING CASH-PARM ATM-SESSION
            SET ZGN-FN-CLOSE TO TRUE
            CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
+           SET CLS-FN-CLOSE TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION
            SET JRNL-FN-CLOSE TO TRUE
            CALL 'ATMJRNL' USING JRNL-PARM ATM-SESSION
            DISPLAY 'ご利用ありがとうございました。'.
@@ -158,7 +161,7 @@
        SS-START.
            ADD 1 TO WS-SESSION-SEQ
            PERFORM REFRESH-CLOCK
-      *    -- セッション ID も端末内で一意にする。端末 ID を前置すると
+      *    -- セッション ID も同じ採番系列から作る。端末 ID を前置すると
       *    -- 12 桁に収まらず連番が落ちて、すべて同じ ID になっていた。
            PERFORM NEXT-TXN-NO
            MOVE SPACES TO SESS-SESSION-ID
@@ -482,10 +485,6 @@
        START-TRANSACTION SECTION.
        ST-START.
            PERFORM REFRESH-CLOCK
-      *    -- 取引 ID は EJ の通番から採る。時刻 + セッション内連番で
-      *    -- 作ると、同じ秒に始まった別セッションの取引と衝突する。
-      *    -- 締めバッチが取引 ID で開始と終了を突き合わせるため、
-      *    -- 重複すると別の取引を不確定として誤検出する。
            PERFORM NEXT-TXN-NO
            MOVE SPACES TO SESS-TXN-ID
            STRING 'T' DELIMITED BY SIZE
@@ -509,11 +508,18 @@
        ST-EXIT.
            EXIT.
 
+      *----------------------------------------------------------------
+      * 端末内で一意な連番を 1 つもらう。取引 ID とセッション ID は
+      * どちらもこの系列から作る。時刻とセッション内連番で作ると、
+      * 連番がセッションごとに 1 へ戻るため、同じ秒に始まった別
+      * セッションの取引と衝突する。締めバッチは取引 ID で開始と終了を
+      * 突き合わせるので、重複すると別の取引を不確定として誤検出する。
+      *----------------------------------------------------------------
        NEXT-TXN-NO SECTION.
        NTN-START.
-           SET JRNL-FN-NEXT-TXN TO TRUE
-           CALL 'ATMJRNL' USING JRNL-PARM ATM-SESSION
-           MOVE JRNL-OUT-TXN-NO TO WS-NEXT-NO.
+           SET CLS-FN-NEXT-NO TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION
+           MOVE CLS-OUT-NEXT-NO TO WS-NEXT-NO.
        NTN-EXIT.
            EXIT.
 

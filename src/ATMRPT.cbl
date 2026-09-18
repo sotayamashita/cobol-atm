@@ -11,6 +11,9 @@
       *     固定長項目の VALUE に置くと UTF-8 で 1 文字 3 バイトに
       *     なり桁が合わないため、リテラルは STRING の被連結側に
       *     だけ置き、桁揃えは ASCII 項目の側で取る。
+      *   - 表示の語彙はこのモジュールが持つ。取引種別コードを受け
+      *     取って和文へ直すのも整形の一部であり、呼出元に和文を
+      *     持たせると帳票の言い回しが業務ロジック側へ漏れる。
       *   - 金額は編集項目に MOVE してから連結する。係員が目視で
       *     照合するので、桁区切りが無いと読めない。
       *   - DETAIL は RCN-TYPE ごとに出す項目を変える。全項目を
@@ -36,6 +39,7 @@
        01  WS-OPENED                   PIC X(01) VALUE 'N'.
        01  WS-LINE                     PIC X(256) VALUE SPACES.
        01  WS-RULE                     PIC X(96)  VALUE ALL '-'.
+       01  WS-LABEL                    PIC X(24)  VALUE SPACES.
 
       *    -- 現在日時。出力時刻は帳票の同一性判断に使うため必ず入れる
        01  WS-NOW                      PIC X(21) VALUE SPACES.
@@ -150,7 +154,8 @@
       *----------------------------------------------------------------
        WRITE-SUMMARY SECTION.
        WRITE-S-START.
-           MOVE RPT-IN-LABEL  TO WS-ED-LABEL
+           PERFORM RESOLVE-LABEL
+           MOVE WS-LABEL      TO WS-ED-LABEL
            MOVE RPT-IN-COUNT  TO WS-ED-COUNT
            MOVE RPT-IN-AMOUNT TO WS-ED-AMOUNT
 
@@ -283,9 +288,10 @@
            EXIT.
 
       *----------------------------------------------------------------
-      * FOOTER : 件数の合計と係員対応の要否
-      *   要否そのものは呼出元が渡した件数から機械的に決まる文言で
-      *   あり、突合の判定ではない。
+      * FOOTER : 件数の合計と、呼出元が決めた要対応の別
+      *   「何をもって要対応とするか」は締めの判断基準なので、ここで
+      *   件数から導かない。導くと、基準を変えたいときに帳票モジュール
+      *   を触ることになる。
       *----------------------------------------------------------------
        WRITE-FOOTER SECTION.
        WRITE-F-START.
@@ -307,13 +313,34 @@
                INTO WS-LINE
            PERFORM WRITE-LINE
 
+      *    -- 実査の有無は差異件数とは別の事実。未実施を黙って
+      *    -- 「差異なし」と並べると、実施して問題なしと読めてしまう。
            MOVE SPACES TO WS-LINE
-           IF RPT-IN-DIFF-CNT = ZERO AND RPT-IN-PENDING-CNT = ZERO
-               STRING '  要対応事象はありません。'
-                   DELIMITED BY SIZE INTO WS-LINE
+           IF RPT-CASH-COUNTED
+               STRING '  現金実査    : 実施済' DELIMITED BY SIZE
+                   INTO WS-LINE
            ELSE
+               STRING '  現金実査    : 未実施 '
+                      '(実査枚数の入力経路が無いため突合していません)'
+                   DELIMITED BY SIZE INTO WS-LINE
+           END-IF
+           PERFORM WRITE-LINE
+
+           IF RPT-TRUNCATED
+               MOVE SPACES TO WS-LINE
+               STRING '  ** 検出件数が上限に達し、明細を打ち切りました。'
+                      '記載漏れがあります。**'
+                   DELIMITED BY SIZE INTO WS-LINE
+               PERFORM WRITE-LINE
+           END-IF
+
+           MOVE SPACES TO WS-LINE
+           IF RPT-ACTION-YES
                STRING '  ** 係員対応が必要です。'
                       '上記の明細を確認してください。**'
+                   DELIMITED BY SIZE INTO WS-LINE
+           ELSE
+               STRING '  要対応事象はありません。'
                    DELIMITED BY SIZE INTO WS-LINE
            END-IF
            PERFORM WRITE-LINE
@@ -336,6 +363,24 @@
       *----------------------------------------------------------------
       *    -- 未オープンのまま書くと帳票が欠ける。障害として返し、
       *    -- ここで勝手に開かない (OPEN は営業日の区切りを兼ねる)
+      *----------------------------------------------------------------
+      * ラベルの解決。取引種別コードで渡されたものは和文に直す。
+      * それ以外はそのまま使う (現金の増減など、呼出元が文言を
+      * 決めたほうが自然な行のため)。
+      *----------------------------------------------------------------
+       RESOLVE-LABEL SECTION.
+       RL-START.
+           EVALUATE RPT-IN-LABEL (1:2)
+               WHEN 'IQ' MOVE '残高照会'     TO WS-LABEL
+               WHEN 'WD' MOVE 'お引出し'     TO WS-LABEL
+               WHEN 'DP' MOVE 'お預入れ'     TO WS-LABEL
+               WHEN 'TR' MOVE 'お振込み'     TO WS-LABEL
+               WHEN 'PC' MOVE '暗証番号変更' TO WS-LABEL
+               WHEN OTHER MOVE RPT-IN-LABEL  TO WS-LABEL
+           END-EVALUATE.
+       RL-EXIT.
+           EXIT.
+
        WRITE-LINE SECTION.
        WL-START.
            IF WS-OPENED NOT = 'Y'

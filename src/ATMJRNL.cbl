@@ -52,7 +52,6 @@
                WHEN JRNL-FN-SCAN-OPEN   PERFORM SCAN-OPEN-JOURNAL
                WHEN JRNL-FN-SCAN-NEXT   PERFORM SCAN-NEXT-JOURNAL
                WHEN JRNL-FN-SCAN-CLOSE  PERFORM SCAN-CLOSE-JOURNAL
-               WHEN JRNL-FN-NEXT-TXN    PERFORM NEXT-TXN-NO
                WHEN OTHER           MOVE RC-FATAL TO JRNL-OUT-RETCODE
            END-EVALUATE
            GOBACK.
@@ -143,24 +142,6 @@
                MOVE RC-IO-ERROR TO JRNL-OUT-RETCODE
            END-IF.
        WRITE-J-EXIT.
-           EXIT.
-
-      *----------------------------------------------------------------
-      * 取引通番の払出し。EJ の通番は OPEN 時に既存レコードから復元
-      * されるので、電源断や再起動をまたいでも重複しない。
-      * ここでは「次に書かれる通番」を覗くだけで消費はしない。取引は
-      * 必ず開始レコードを書くため、次の取引はより大きい値を得る。
-      *----------------------------------------------------------------
-       NEXT-TXN-NO SECTION.
-       NTN-START.
-           IF WS-OPENED NOT = 'Y'
-               PERFORM OPEN-JOURNAL
-               IF JRNL-OUT-RETCODE NOT = RC-OK
-                   GO TO NTN-EXIT
-               END-IF
-           END-IF
-           COMPUTE JRNL-OUT-TXN-NO = WS-SEQ + 1.
-       NTN-EXIT.
            EXIT.
 
        CLOSE-JOURNAL SECTION.

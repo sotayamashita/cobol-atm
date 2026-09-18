@@ -18,6 +18,7 @@
 | `src/ATMJRNL.cbl` | 電子ジャーナル出力 (追記専用) |
 | `src/ATMCAL.cbl` | 営業日カレンダー。曜日区分・祝日・翌営業日 |
 | `src/ATMZGN.cbl` | 全銀システム接続。コアタイム / モアタイムの経路判定 |
+| `src/ATMCLS.cbl` | 端末状態。締め状態と連番の採番 |
 | `src/ATMDAY.cbl` | 日次締めバッチ。不確定取引の抽出と現金突合 |
 | `src/ATMRPT.cbl` | 締めレポートの整形出力 |
 | `src/ATMSEED.cbl` | 試験用マスタの初期作成 |

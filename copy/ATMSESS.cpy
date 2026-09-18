@@ -56,9 +56,8 @@
                88  SESS-DT-HOLIDAY             VALUE 'H'.
            05  SESS-BAL-BEFORE         PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-BAL-AFTER          PIC S9(13)V99 SIGN LEADING SEPARATE.
-      *    -- 他行あて為替の追跡番号と入金日。EJ と画面が同じ値を見る。
+      *    -- 他行あて為替の追跡番号。EJ に残して日次突合の鍵にする。
            05  SESS-TRACE-NO           PIC X(12).
-           05  SESS-VALUE-DATE         PIC 9(08).
       *    -- 直近の結果 (EJ への出力と画面表示に使う)
            05  SESS-ERROR-CODE         PIC X(04).
            05  SESS-ERROR-MESSAGE      PIC X(60).

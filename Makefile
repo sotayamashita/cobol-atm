@@ -1,14 +1,14 @@
 COBC      := cobc
 COBFLAGS  := -Wall -I copy -std=cobol2002 -ftext-column=250
 BIN       := bin
-MODULES   := ATMAUTH ATMACCT ATMPOST ATMCASH ATMJRNL ATMCAL ATMZGN
+MODULES   := ATMAUTH ATMACCT ATMPOST ATMCASH ATMJRNL ATMCAL ATMZGN ATMCLS
 
 .PHONY: all seed run close test clean journal
 
 all: $(BIN)/atm $(BIN)/atmseed $(BIN)/atmday $(BIN)/caltest $(BIN)/zgntest
 
 # 日次締めバッチ。端末が停止している時間帯に流す
-$(BIN)/atmday: src/ATMDAY.cbl src/ATMJRNL.cbl src/ATMCASH.cbl src/ATMRPT.cbl src/ATMCAL.cbl
+$(BIN)/atmday: src/ATMDAY.cbl src/ATMJRNL.cbl src/ATMCASH.cbl src/ATMRPT.cbl src/ATMCLS.cbl
 	@mkdir -p $(BIN) data
 	$(COBC) -x $(COBFLAGS) -o $@ $^
 

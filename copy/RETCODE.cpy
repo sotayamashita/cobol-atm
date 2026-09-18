@@ -36,6 +36,8 @@
       *    -- 現金機構系 (4xxx)
            05  EC-CASH-SHORTAGE        PIC X(04) VALUE '4001'.
            05  EC-CASH-NO-COMBINATION  PIC X(04) VALUE '4002'.
+      *       実査枚数と帳簿枚数の差異。現金機構の事象なのでこの帯。
+           05  EC-CASH-COUNT-DIFF      PIC X(04) VALUE '4003'.
       *    -- 他行接続系 (5xxx)
       *       全銀システムはコアタイム (平日 8:30-15:30) とモアタイム
       *       (夜間・休日、参加は任意) の 2 階建て。相手行がモアタイム
@@ -49,8 +51,6 @@
       *       流してはならない。再実行と多重実行をコードで区別する。
            05  EC-ALREADY-CLOSED       PIC X(04) VALUE '6001'.
            05  EC-CLOSE-IN-PROGRESS    PIC X(04) VALUE '6002'.
-           05  EC-CLOSE-ABORTED        PIC X(04) VALUE '6003'.
-           05  EC-CASH-COUNT-DIFF      PIC X(04) VALUE '6004'.
 
       *    -- システム系 (9xxx)
            05  EC-SYSTEM-IO            PIC X(04) VALUE '9001'.

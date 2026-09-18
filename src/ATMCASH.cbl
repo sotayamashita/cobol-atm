@@ -375,6 +375,9 @@
       *   払出可能枚数 (COMPUTE-AVAILABLE) ではなく CASH-NOTE-CNT を
       *   そのまま返すのは、障害中カセットの紙幣も物理的には残っており
       *   帳簿上は在庫だからである。
+      *   状態もそのまま返す。枚数だけでは障害中と正常が区別できず、
+      *   呼出元が装填の要否を判断できない。判断そのものは呼出元の
+      *   責務なので、ここは事実を返すだけにする。
       *----------------------------------------------------------------
        REPORT-THEORY SECTION.
        THR-START.
@@ -386,6 +389,7 @@
            PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
                MOVE CASH-DENOM(WS-C)    TO CASH-TH-DENOM(WS-C)
                MOVE CASH-NOTE-CNT(WS-C) TO CASH-TH-CNT(WS-C)
+               MOVE CASH-STATUS(WS-C)   TO CASH-TH-STATUS(WS-C)
            END-PERFORM
 
            MOVE CASH-DISPENSED-TODAY TO CASH-OUT-DISPENSED

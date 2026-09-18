@@ -60,5 +60,13 @@
            05  CASH-OUT-THEORY.
                10  CASH-TH-DENOM OCCURS 4 TIMES PIC 9(06).
                10  CASH-TH-CNT   OCCURS 4 TIMES PIC 9(05).
+      *        -- カセットの状態。帳簿枚数だけでは障害中と正常が
+      *        -- 区別できず、装填の要否を係員が判断できない。
+      *        -- 値の意味は CASHREC.cpy の CASH-STATUS と同じ。
+               10  CASH-TH-STATUS OCCURS 4 TIMES PIC X(01).
+                   88  CASH-TH-ST-OK               VALUE 'O'.
+                   88  CASH-TH-ST-LOW              VALUE 'L'.
+                   88  CASH-TH-ST-EMPTY            VALUE 'E'.
+                   88  CASH-TH-ST-FAULT            VALUE 'F'.
            05  CASH-OUT-DISPENSED      PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  CASH-OUT-DEPOSITED      PIC S9(13)V99 SIGN LEADING SEPARATE.

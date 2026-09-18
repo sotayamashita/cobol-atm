@@ -44,6 +44,7 @@
        01  WS-EDIT.
       *    -- 添字は COMP なので、そのまま DISPLAY すると符号が出る。
            05  WS-ED-CASSETTE          PIC 9(01).
+           05  WS-ED-STATUS            PIC X(08).
            05  WS-ED-DENOM             PIC ZZ,ZZ9.
            05  WS-ED-NOTES             PIC ZZ,ZZ9.
            05  WS-ED-AMOUNT            PIC ---,---,---,--9.
@@ -155,10 +156,27 @@
                MOVE WS-C                TO WS-ED-CASSETTE
                MOVE CASH-TH-DENOM(WS-C) TO WS-ED-DENOM
                MOVE CASH-TH-CNT(WS-C)   TO WS-ED-NOTES
+               PERFORM EDIT-CASSETTE-STATUS
                DISPLAY '    カセット' WS-ED-CASSETTE ': ' WS-ED-DENOM
-                       ' 円券 x ' WS-ED-NOTES ' 枚'
+                       ' 円券 x ' WS-ED-NOTES ' 枚  ' WS-ED-STATUS
            END-PERFORM.
        SHC-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 状態を係員向けの文言にする。枚数だけでは障害中と正常が区別
+      * できず、どのカセットを抜くべきか判断できない。装填の要否を
+      * 決めるのは係員なので、ここは事実を示すだけにする。
+      *----------------------------------------------------------------
+       EDIT-CASSETTE-STATUS SECTION.
+       ECS-START.
+           EVALUATE TRUE
+               WHEN CASH-TH-ST-FAULT(WS-C) MOVE '障害'   TO WS-ED-STATUS
+               WHEN CASH-TH-ST-EMPTY(WS-C) MOVE '空'     TO WS-ED-STATUS
+               WHEN CASH-TH-ST-LOW(WS-C)   MOVE '残少'   TO WS-ED-STATUS
+               WHEN OTHER                  MOVE '正常'   TO WS-ED-STATUS
+           END-EVALUATE.
+       ECS-EXIT.
            EXIT.
 
       *================================================================

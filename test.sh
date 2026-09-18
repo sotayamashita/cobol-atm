@@ -112,6 +112,15 @@ load_filter() {
   grep -E '円券 x|在庫増減|変更していません|範囲外|正しくありません|\[[0-9]{4}\]' || true
 }
 
+echo "-- 帳簿枚数とカセットの状態を示す (障害中のカセットを含む)"
+python3 -c "
+p='data/atmcash.dat'
+d=bytearray(open(p,'rb').read()); i=d.index(b'ATM00001'); d[i+66:i+67]=b'F'
+open(p,'wb').write(d)
+"
+printf '\n\n\n\n' | ./bin/atmload | load_filter
+./bin/atmseed >/dev/null
+
 echo "-- 2 千券を 150 枚、千券を 500 枚に装填"
 printf '\n\n150\n500\n' | ./bin/atmload | load_filter
 

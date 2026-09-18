@@ -42,6 +42,11 @@
            SELECT HOL-FILE ASSIGN TO 'data/atmhol.dat'
                ORGANIZATION IS LINE SEQUENTIAL
                FILE STATUS IS WS-STATUS.
+           SELECT CLOSE-FILE ASSIGN TO 'data/atmclose.dat'
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS RANDOM
+               RECORD KEY IS CLS-ATM-ID
+               FILE STATUS IS WS-STATUS.
 
        DATA DIVISION.
        FILE SECTION.
@@ -61,6 +66,8 @@
        01  HOL-RECORD.
            05  HOL-DATE                PIC 9(08).
            05  FILLER                  PIC X(32).
+       FD  CLOSE-FILE.
+       COPY 'CLOSEREC.cpy'.
 
        WORKING-STORAGE SECTION.
        01  WS-STATUS                   PIC X(02) VALUE '00'.
@@ -76,6 +83,7 @@
        MAIN-START.
            OPEN OUTPUT ACCT-FILE CARD-FILE CASH-FILE
                        BANK-FILE FEE-FILE LIMIT-FILE HOL-FILE
+                       CLOSE-FILE
 
            PERFORM SEED-ACCOUNTS
            PERFORM SEED-CARDS
@@ -84,9 +92,11 @@
            PERFORM SEED-FEES
            PERFORM SEED-LIMITS
            PERFORM SEED-HOLIDAYS
+           PERFORM SEED-CLOSE-STATE
 
            CLOSE ACCT-FILE CARD-FILE CASH-FILE
                  BANK-FILE FEE-FILE LIMIT-FILE HOL-FILE
+                 CLOSE-FILE
            DISPLAY 'マスタを初期化しました。'
            DISPLAY '  口座 1000000001 / カード 4900123456780001'
                    ' / PIN 1234 / 磁気'
@@ -485,6 +495,22 @@
            MOVE 20261123 TO HOL-DATE
            WRITE HOL-RECORD END-WRITE.
        WHL-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 締め状態。前営業日まで締め済み、実行中でない状態から始める。
+      *----------------------------------------------------------------
+       SEED-CLOSE-STATE SECTION.
+       SCS-START.
+           MOVE SPACES TO CLOSE-RECORD
+           MOVE CN-ATM-ID TO CLS-ATM-ID
+           MOVE 20260916  TO CLS-LAST-CLOSED-DATE
+           MOVE 20260916180000 TO CLS-LAST-CLOSED-TS
+           SET  CLS-ST-IDLE TO TRUE
+           MOVE ZERO TO CLS-LAST-DIFF-CNT
+           MOVE ZERO TO CLS-LAST-PENDING-CNT
+           WRITE CLOSE-RECORD END-WRITE.
+       SCS-EXIT.
            EXIT.
 
       *----------------------------------------------------------------

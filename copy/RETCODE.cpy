@@ -44,6 +44,14 @@
            05  EC-BANK-OFFLINE         PIC X(04) VALUE '5002'.
            05  EC-ZENGIN-TIMEOUT       PIC X(04) VALUE '5003'.
 
+      *    -- 日次締め系 (6xxx)
+      *       締めは営業日の取引を確定させる操作なので、同じ日に二度
+      *       流してはならない。再実行と多重実行をコードで区別する。
+           05  EC-ALREADY-CLOSED       PIC X(04) VALUE '6001'.
+           05  EC-CLOSE-IN-PROGRESS    PIC X(04) VALUE '6002'.
+           05  EC-CLOSE-ABORTED        PIC X(04) VALUE '6003'.
+           05  EC-CASH-COUNT-DIFF      PIC X(04) VALUE '6004'.
+
       *    -- システム系 (9xxx)
            05  EC-SYSTEM-IO            PIC X(04) VALUE '9001'.
            05  EC-SYSTEM-BUSY          PIC X(04) VALUE '9002'.

@@ -18,6 +18,11 @@
            05  EC-CARD-CAPTURED        PIC X(04) VALUE '1003'.
            05  EC-CARD-LOCKED          PIC X(04) VALUE '1004'.
            05  EC-PIN-INVALID          PIC X(04) VALUE '1005'.
+      *    -- 媒体・認証方式系 (11xx)
+           05  EC-MEDIA-UNSUPPORTED    PIC X(04) VALUE '1101'.
+           05  EC-BIO-NOT-ENROLLED     PIC X(04) VALUE '1102'.
+           05  EC-BIO-MISMATCH         PIC X(04) VALUE '1103'.
+           05  EC-IC-AUTH-FAILED       PIC X(04) VALUE '1104'.
       *    -- 口座系 (2xxx)
            05  EC-ACCT-UNKNOWN         PIC X(04) VALUE '2001'.
            05  EC-ACCT-FROZEN          PIC X(04) VALUE '2002'.
@@ -34,6 +39,15 @@
       *    -- 現金機構系 (4xxx)
            05  EC-CASH-SHORTAGE        PIC X(04) VALUE '4001'.
            05  EC-CASH-NO-COMBINATION  PIC X(04) VALUE '4002'.
+      *    -- 他行接続系 (5xxx)
+      *       全銀システムはコアタイム (平日 8:30-15:30) とモアタイム
+      *       (夜間・休日、参加は任意) の 2 階建て。相手行がモアタイム
+      *       未参加なら、その時間帯の他行あては翌営業日扱いになる。
+           05  EC-BANK-UNKNOWN         PIC X(04) VALUE '5001'.
+           05  EC-BANK-OFFLINE         PIC X(04) VALUE '5002'.
+           05  EC-ZENGIN-TIMEOUT       PIC X(04) VALUE '5003'.
+           05  EC-NEXT-BUSINESS-DAY    PIC X(04) VALUE '5004'.
+
       *    -- システム系 (9xxx)
            05  EC-SYSTEM-IO            PIC X(04) VALUE '9001'.
            05  EC-SYSTEM-BUSY          PIC X(04) VALUE '9002'.

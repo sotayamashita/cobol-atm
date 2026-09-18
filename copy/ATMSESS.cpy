@@ -16,6 +16,19 @@
            05  SESS-PAN-MASKED         PIC X(16).
            05  SESS-ACCT-NO            PIC X(10).
            05  SESS-HOLDER-NAME        PIC X(30).
+      *    -- カード媒体。磁気は JIS II 型 (国内独自)、IC は全銀協
+      *    -- IC キャッシュカード標準仕様 (EMV 準拠)。両者は併存する。
+           05  SESS-CARD-MEDIA         PIC X(01).
+               88  SESS-MEDIA-MAGNETIC         VALUE 'M'.
+               88  SESS-MEDIA-IC               VALUE 'I'.
+      *    -- 成立した認証方式。限度額はこれで変わる。
+      *       P = 暗証番号のみ (ホスト照合)
+      *       O = IC オフライン PIN (カード内で照合)
+      *       B = IC + 生体認証
+           05  SESS-AUTH-METHOD        PIC X(01).
+               88  SESS-AM-PIN-ONLY            VALUE 'P'.
+               88  SESS-AM-IC-OFFLINE          VALUE 'O'.
+               88  SESS-AM-BIOMETRIC           VALUE 'B'.
       *    -- 取引単位の作業域 (ATMMAIN が取引ごとに初期化)
            05  SESS-TXN-ID             PIC X(12).
            05  SESS-TXN-TYPE           PIC X(02).
@@ -26,7 +39,14 @@
                88  SESS-TT-PIN-CHANGE          VALUE 'PC'.
            05  SESS-TXN-AMOUNT         PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-TXN-FEE            PIC S9(13)V99 SIGN LEADING SEPARATE.
+           05  SESS-CPTY-BANK-CD       PIC X(04).
            05  SESS-CPTY-ACCT-NO       PIC X(10).
+      *    -- 当日の曜日区分 (ATMCAL が設定)。手数料と全銀接続の
+      *    -- 判定はどちらもこれを見る。
+           05  SESS-DAY-TYPE           PIC X(01).
+               88  SESS-DT-WEEKDAY             VALUE 'W'.
+               88  SESS-DT-SATURDAY            VALUE 'S'.
+               88  SESS-DT-HOLIDAY             VALUE 'H'.
            05  SESS-BAL-BEFORE         PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-BAL-AFTER          PIC S9(13)V99 SIGN LEADING SEPARATE.
       *    -- 直近の結果 (EJ への出力と画面表示に使う)

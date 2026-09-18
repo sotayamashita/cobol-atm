@@ -26,4 +26,16 @@
            05  CARD-LIMIT-PER-TXN      PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  CARD-LIMIT-DAILY-AMT    PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  CARD-LIMIT-DAILY-CNT    PIC 9(03).
-           05  FILLER                  PIC X(06).
+      *    -- 媒体。磁気 (JIS II 型) と IC (全銀協標準仕様) は併存する
+           05  CARD-MEDIA              PIC X(01).
+               88  CARD-MD-MAGNETIC            VALUE 'M'.
+               88  CARD-MD-IC                  VALUE 'I'.
+      *    -- 生体認証の登録有無。登録済 IC カードは限度額が上がる
+           05  CARD-BIO-ENROLLED       PIC X(01).
+               88  CARD-BIO-YES                VALUE 'Y'.
+               88  CARD-BIO-NO                 VALUE 'N'.
+      *    -- 発行区分。自行カードと提携行カードで手数料体系が違う
+           05  CARD-KIND               PIC X(01).
+               88  CARD-KD-OWN                 VALUE 'O'.
+               88  CARD-KD-PARTNER             VALUE 'P'.
+           05  FILLER                  PIC X(03).

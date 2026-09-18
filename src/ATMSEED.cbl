@@ -28,6 +28,20 @@
                ACCESS MODE IS RANDOM
                RECORD KEY IS CASH-ATM-ID
                FILE STATUS IS WS-STATUS.
+           SELECT BANK-FILE ASSIGN TO 'data/atmbank.dat'
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS RANDOM
+               RECORD KEY IS BANK-CD
+               FILE STATUS IS WS-STATUS.
+           SELECT FEE-FILE ASSIGN TO 'data/atmfee.dat'
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-STATUS.
+           SELECT LIMIT-FILE ASSIGN TO 'data/atmlimit.dat'
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-STATUS.
+           SELECT HOL-FILE ASSIGN TO 'data/atmhol.dat'
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-STATUS.
 
        DATA DIVISION.
        FILE SECTION.
@@ -37,6 +51,16 @@
        COPY 'CARDREC.cpy'.
        FD  CASH-FILE.
        COPY 'CASHREC.cpy'.
+       FD  BANK-FILE.
+       COPY 'BANKREC.cpy'.
+       FD  FEE-FILE.
+       COPY 'FEEREC.cpy'.
+       FD  LIMIT-FILE.
+       COPY 'LIMITREC.cpy'.
+       FD  HOL-FILE.
+       01  HOL-RECORD.
+           05  HOL-DATE                PIC 9(08).
+           05  FILLER                  PIC X(32).
 
        WORKING-STORAGE SECTION.
        01  WS-STATUS                   PIC X(02) VALUE '00'.
@@ -51,15 +75,23 @@
        MAIN-CONTROL SECTION.
        MAIN-START.
            OPEN OUTPUT ACCT-FILE CARD-FILE CASH-FILE
+                       BANK-FILE FEE-FILE LIMIT-FILE HOL-FILE
 
            PERFORM SEED-ACCOUNTS
            PERFORM SEED-CARDS
            PERFORM SEED-CASSETTE
+           PERFORM SEED-BANKS
+           PERFORM SEED-FEES
+           PERFORM SEED-LIMITS
+           PERFORM SEED-HOLIDAYS
 
            CLOSE ACCT-FILE CARD-FILE CASH-FILE
+                 BANK-FILE FEE-FILE LIMIT-FILE HOL-FILE
            DISPLAY 'マスタを初期化しました。'
-           DISPLAY '  口座 1000000001 / カード 4900123456780001 / PIN 1234'
-           DISPLAY '  口座 1000000002 / カード 4900123456780002 / PIN 9999'
+           DISPLAY '  口座 1000000001 / カード 4900123456780001'
+                   ' / PIN 1234 / 磁気'
+           DISPLAY '  口座 1000000002 / カード 4900123456780002'
+                   ' / PIN 9999 / IC + 生体認証'
            STOP RUN.
 
        SEED-ACCOUNTS SECTION.
@@ -133,6 +165,9 @@
            MOVE 200000.00 TO CARD-LIMIT-PER-TXN
            MOVE 500000.00 TO CARD-LIMIT-DAILY-AMT
            MOVE 10       TO CARD-LIMIT-DAILY-CNT
+           SET  CARD-MD-MAGNETIC TO TRUE
+           SET  CARD-BIO-NO      TO TRUE
+           SET  CARD-KD-OWN      TO TRUE
            WRITE CARD-RECORD END-WRITE
 
            MOVE SPACES TO CARD-RECORD
@@ -152,8 +187,266 @@
            MOVE 50000.00 TO CARD-LIMIT-PER-TXN
            MOVE 100000.00 TO CARD-LIMIT-DAILY-AMT
            MOVE 3        TO CARD-LIMIT-DAILY-CNT
+           SET  CARD-MD-IC   TO TRUE
+           SET  CARD-BIO-YES TO TRUE
+           SET  CARD-KD-OWN  TO TRUE
            WRITE CARD-RECORD END-WRITE.
        SC-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 金融機関マスタ。自行 1 行 + 他行 3 行。
+      * モアタイム参加 / 未参加 / 時間限定参加 の 3 パターンを揃える。
+      *----------------------------------------------------------------
+       SEED-BANKS SECTION.
+       SB-START.
+      *    -- 自行
+           MOVE SPACES TO BANK-RECORD
+           MOVE '0001'        TO BANK-CD
+           MOVE 'コボル銀行'   TO BANK-NAME
+           SET  BANK-OWN           TO TRUE
+           SET  BANK-MT-JOINED     TO TRUE
+           MOVE 0000 TO BANK-MT-FROM-HHMM
+           MOVE 0000 TO BANK-MT-TO-HHMM
+           MOVE 'Y'  TO BANK-ONLINE
+           WRITE BANK-RECORD END-WRITE
+
+      *    -- モアタイム参加 (24 時間接続)
+           MOVE SPACES TO BANK-RECORD
+           MOVE '0005'        TO BANK-CD
+           MOVE 'さくら信販銀行' TO BANK-NAME
+           SET  BANK-OTHER         TO TRUE
+           SET  BANK-MT-JOINED     TO TRUE
+           MOVE 0000 TO BANK-MT-FROM-HHMM
+           MOVE 0000 TO BANK-MT-TO-HHMM
+           MOVE 'Y'  TO BANK-ONLINE
+           WRITE BANK-RECORD END-WRITE
+
+      *    -- モアタイム未参加。夜間・休日は翌営業日扱いになる
+           MOVE SPACES TO BANK-RECORD
+           MOVE '0009'        TO BANK-CD
+           MOVE 'みなと第一銀行' TO BANK-NAME
+           SET  BANK-OTHER         TO TRUE
+           SET  BANK-MT-NOT-JOINED TO TRUE
+           MOVE 0000 TO BANK-MT-FROM-HHMM
+           MOVE 0000 TO BANK-MT-TO-HHMM
+           MOVE 'Y'  TO BANK-ONLINE
+           WRITE BANK-RECORD END-WRITE
+
+      *    -- 参加しているが接続時間を限定している行
+           MOVE SPACES TO BANK-RECORD
+           MOVE '0012'        TO BANK-CD
+           MOVE '北洋みらい信用金庫' TO BANK-NAME
+           SET  BANK-OTHER         TO TRUE
+           SET  BANK-MT-JOINED     TO TRUE
+           MOVE 0800 TO BANK-MT-FROM-HHMM
+           MOVE 2100 TO BANK-MT-TO-HHMM
+           MOVE 'Y'  TO BANK-ONLINE
+           WRITE BANK-RECORD END-WRITE.
+       SB-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 手数料マスタ。曜日区分 × 時間帯 × カード区分。
+      * 実際の大手行の体系に合わせた値。
+      *   平日 8:45-18:00 無料 / 平日それ以外 110 円
+      *   土曜 9:00-14:00 110 円 / 土曜それ以外 220 円
+      *   日曜・祝日 220 円
+      * 提携行カードは一律 110 円上乗せする。
+      *----------------------------------------------------------------
+       SEED-FEES SECTION.
+       SF-START.
+      *    -- 自行カード / 出金
+           PERFORM WRITE-FEE-OWN-WEEKDAY
+           PERFORM WRITE-FEE-OWN-SATURDAY
+           PERFORM WRITE-FEE-OWN-HOLIDAY
+           PERFORM WRITE-FEE-PARTNER.
+       SF-EXIT.
+           EXIT.
+
+       WRITE-FEE-OWN-WEEKDAY SECTION.
+       WFW-START.
+           PERFORM SET-FEE-DEFAULTS
+           MOVE 'O' TO FEE-CARD-KIND
+           MOVE 'W' TO FEE-DAY-TYPE
+           MOVE 0000 TO FEE-FROM-HHMM
+           MOVE 0845 TO FEE-TO-HHMM
+           MOVE 110  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 0845 TO FEE-FROM-HHMM
+           MOVE 1800 TO FEE-TO-HHMM
+           MOVE ZERO TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 1800 TO FEE-FROM-HHMM
+           MOVE 2400 TO FEE-TO-HHMM
+           MOVE 110  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE.
+       WFW-EXIT.
+           EXIT.
+
+       WRITE-FEE-OWN-SATURDAY SECTION.
+       WFS-START.
+           PERFORM SET-FEE-DEFAULTS
+           MOVE 'O' TO FEE-CARD-KIND
+           MOVE 'S' TO FEE-DAY-TYPE
+           MOVE 0000 TO FEE-FROM-HHMM
+           MOVE 0900 TO FEE-TO-HHMM
+           MOVE 220  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 0900 TO FEE-FROM-HHMM
+           MOVE 1400 TO FEE-TO-HHMM
+           MOVE 110  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 1400 TO FEE-FROM-HHMM
+           MOVE 2400 TO FEE-TO-HHMM
+           MOVE 220  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE.
+       WFS-EXIT.
+           EXIT.
+
+       WRITE-FEE-OWN-HOLIDAY SECTION.
+       WFH-START.
+           PERFORM SET-FEE-DEFAULTS
+           MOVE 'O' TO FEE-CARD-KIND
+           MOVE 'H' TO FEE-DAY-TYPE
+           MOVE 0000 TO FEE-FROM-HHMM
+           MOVE 2400 TO FEE-TO-HHMM
+           MOVE 220  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE.
+       WFH-EXIT.
+           EXIT.
+
+      *    -- 提携行カードは終日 220 円 / 休日は 330 円
+       WRITE-FEE-PARTNER SECTION.
+       WFP-START.
+           PERFORM SET-FEE-DEFAULTS
+           MOVE 'P' TO FEE-CARD-KIND
+           MOVE 'W' TO FEE-DAY-TYPE
+           MOVE 0000 TO FEE-FROM-HHMM
+           MOVE 2400 TO FEE-TO-HHMM
+           MOVE 220  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 'S' TO FEE-DAY-TYPE
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 'H' TO FEE-DAY-TYPE
+           MOVE 330 TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE.
+       WFP-EXIT.
+           EXIT.
+
+       SET-FEE-DEFAULTS SECTION.
+       SFD-START.
+           MOVE SPACES TO FEE-RECORD
+           MOVE 'WD' TO FEE-TXN-TYPE.
+       SFD-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 限度額マスタ。媒体 × 認証方式。
+      * ゆうちょ銀行が 2026 年 8 月 17 日に、暗証番号のみの取引の
+      * 1 日あたり引出上限を 200 万円から 50 万円へ引き下げた体系に
+      * 合わせている。IC + 生体認証なら 500 万円まで。
+      *----------------------------------------------------------------
+       SEED-LIMITS SECTION.
+       SL-START.
+      *    -- 磁気カード + 暗証番号のみ
+           MOVE SPACES TO LIMIT-RECORD
+           MOVE 'M' TO LIMIT-MEDIA
+           MOVE 'P' TO LIMIT-AUTH-METHOD
+           MOVE 500000     TO LIMIT-PER-TXN
+           MOVE 500000     TO LIMIT-DAILY-AMT
+           MOVE 10         TO LIMIT-DAILY-CNT
+           MOVE '磁気 暗証番号のみ' TO LIMIT-NOTE
+           WRITE LIMIT-RECORD END-WRITE
+
+      *    -- IC カード + 暗証番号のみ (磁気と同額)
+           MOVE SPACES TO LIMIT-RECORD
+           MOVE 'I' TO LIMIT-MEDIA
+           MOVE 'P' TO LIMIT-AUTH-METHOD
+           MOVE 500000     TO LIMIT-PER-TXN
+           MOVE 500000     TO LIMIT-DAILY-AMT
+           MOVE 10         TO LIMIT-DAILY-CNT
+           MOVE 'IC 暗証番号のみ' TO LIMIT-NOTE
+           WRITE LIMIT-RECORD END-WRITE
+
+      *    -- IC カード + オフライン PIN (カード内照合)
+           MOVE SPACES TO LIMIT-RECORD
+           MOVE 'I' TO LIMIT-MEDIA
+           MOVE 'O' TO LIMIT-AUTH-METHOD
+           MOVE 1000000    TO LIMIT-PER-TXN
+           MOVE 2000000    TO LIMIT-DAILY-AMT
+           MOVE 10         TO LIMIT-DAILY-CNT
+           MOVE 'IC オフライン PIN' TO LIMIT-NOTE
+           WRITE LIMIT-RECORD END-WRITE
+
+      *    -- IC カード + 生体認証
+           MOVE SPACES TO LIMIT-RECORD
+           MOVE 'I' TO LIMIT-MEDIA
+           MOVE 'B' TO LIMIT-AUTH-METHOD
+           MOVE 1000000    TO LIMIT-PER-TXN
+           MOVE 5000000    TO LIMIT-DAILY-AMT
+           MOVE 20         TO LIMIT-DAILY-CNT
+           MOVE 'IC 生体認証' TO LIMIT-NOTE
+           WRITE LIMIT-RECORD END-WRITE.
+       SL-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 祝日マスタ。昇順であること (ATMCAL が二分探索で引くため)。
+      * 2026 年の国民の祝日と振替休日。
+      *----------------------------------------------------------------
+       SEED-HOLIDAYS SECTION.
+       SH-START.
+           MOVE SPACES TO HOL-RECORD
+           PERFORM WRITE-HOLIDAY-LIST.
+       SH-EXIT.
+           EXIT.
+
+       WRITE-HOLIDAY-LIST SECTION.
+       WHL-START.
+           MOVE 20260101 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260112 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260211 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260223 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260320 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260429 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260503 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260504 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260505 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260506 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260720 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260811 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260921 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260922 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20260923 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20261012 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20261103 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE
+           MOVE 20261123 TO HOL-DATE
+           WRITE HOL-RECORD END-WRITE.
+       WHL-EXIT.
            EXIT.
 
       *----------------------------------------------------------------

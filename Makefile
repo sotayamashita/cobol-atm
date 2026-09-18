@@ -43,9 +43,12 @@ $(BIN)/atmseed: src/ATMSEED.cbl src/ATMAUTH.cbl src/ATMENV.cbl
 	@mkdir -p $(BIN) data
 	$(COBC) -x $(COBFLAGS) -o $@ $^
 
-# マスタを初期状態に戻す (既存の残高・ジャーナルは消える)
+# マスタを初期状態に戻す (既存の残高は消える)。
+# 消すのは共有マスタと、ATM_ID が指す端末のカセットだけ。全端末分を
+# 消すと、2 台目を用意しただけで 1 台目の在庫が飛ぶ。
 seed: $(BIN)/atmseed
-	@rm -f data/atmacct.dat data/atmcard.dat data/atmcash-*.dat
+	@rm -f data/atmacct.dat data/atmcard.dat \
+	       data/atmcash-$${ATM_ID:-ATM00001}.dat
 	./$(BIN)/atmseed
 
 run: all
@@ -66,9 +69,9 @@ purge: all
 test: all
 	./test.sh
 
-# 電子ジャーナルを読む
+# 電子ジャーナルを読む。端末ごとに分かれるので ATM_ID に従う。
 journal:
-	@cat data/atmjrnl.dat
+	@cat data/atmjrnl-$${ATM_ID:-ATM00001}.dat
 
 clean:
 	rm -rf $(BIN)

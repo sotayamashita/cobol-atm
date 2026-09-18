@@ -27,4 +27,7 @@
            05  JRNL-ERROR-CODE         PIC X(04).
            05  JRNL-DISPENSED.
                10  JRNL-DSP-CNT OCCURS 4 TIMES PIC 9(03).
-           05  FILLER                  PIC X(25).
+      *    -- 他行あて為替の追跡番号。成否不明で終わった取引を日次で
+      *    -- 相手行と突合する際の鍵になるので、EJ に必ず残す。
+           05  JRNL-TRACE-NO           PIC X(12).
+           05  FILLER                  PIC X(13).

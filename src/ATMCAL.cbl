@@ -71,7 +71,6 @@
            EVALUATE TRUE
                WHEN CAL-FN-DAY-TYPE       PERFORM CLASSIFY-DATE
                WHEN CAL-FN-NEXT-BUSINESS  PERFORM FIND-NEXT-BUSINESS
-               WHEN CAL-FN-CLOSE          CONTINUE
                WHEN OTHER
                    MOVE RC-FATAL TO CAL-OUT-RETCODE
            END-EVALUATE

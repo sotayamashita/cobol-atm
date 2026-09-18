@@ -13,7 +13,12 @@
       *****************************************************************
        01  FEE-RECORD.
            05  FEE-CARD-KIND           PIC X(01).
+               88  FEE-CK-OWN                  VALUE 'O'.
+               88  FEE-CK-PARTNER              VALUE 'P'.
            05  FEE-DAY-TYPE            PIC X(01).
+               88  FEE-DT-WEEKDAY              VALUE 'W'.
+               88  FEE-DT-SATURDAY             VALUE 'S'.
+               88  FEE-DT-HOLIDAY              VALUE 'H'.
            05  FEE-TXN-TYPE            PIC X(02).
            05  FEE-FROM-HHMM           PIC 9(04).
            05  FEE-TO-HHMM             PIC 9(04).

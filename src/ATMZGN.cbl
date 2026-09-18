@@ -92,7 +92,6 @@
        RT-START.
            MOVE SPACES TO ZGN-OUT-BANK-NAME
            MOVE SPACE  TO ZGN-OUT-ROUTE
-           MOVE 'N'    TO ZGN-OUT-IMMEDIATE
            MOVE ZERO   TO ZGN-OUT-VALUE-DATE
 
            PERFORM LOAD-BANK
@@ -111,16 +110,11 @@
            END-IF
 
            MOVE SESS-TIMESTAMP TO WS-TS
-           PERFORM GET-DAY-TYPE
-           IF ZGN-OUT-RETCODE NOT = RC-OK
-               GO TO RT-EXIT
-           END-IF
 
-           IF CAL-DT-WEEKDAY
+           IF SESS-DT-WEEKDAY
               AND WS-TS-HHMM >= WS-CORE-FROM
               AND WS-TS-HHMM <= WS-CORE-TO
                SET ZGN-RT-CORE TO TRUE
-               MOVE 'Y'        TO ZGN-OUT-IMMEDIATE
                MOVE WS-TS-DATE TO ZGN-OUT-VALUE-DATE
                GO TO RT-EXIT
            END-IF
@@ -128,23 +122,21 @@
            PERFORM CHECK-MORETIME
            IF WS-MT-OK = 'Y'
                SET ZGN-RT-MORETIME TO TRUE
-               MOVE 'Y'            TO ZGN-OUT-IMMEDIATE
                MOVE WS-TS-DATE     TO ZGN-OUT-VALUE-DATE
                GO TO RT-EXIT
            END-IF
 
       *    -- 相手行がモアタイム未参加、または接続時間外。翌営業日の
-      *    -- 入金になることは失敗ではないので、利用者に予告できるよう
-      *    -- 業務エラーコードだけ立てて経路は返す。
+      *    -- 入金になるのは取引の失敗ではないので RC-OK で返し、
+      *    -- 経路 (ZGN-RT-NEXT-DAY) と入金日で状態を表す。ここで
+      *    -- エラーコードを立てると、呼出元がそれだけを特例で
+      *    -- 除外することになり、経路が増えるたびに穴が増える。
            PERFORM GET-NEXT-BUSINESS
            IF ZGN-OUT-RETCODE NOT = RC-OK
                GO TO RT-EXIT
            END-IF
            SET ZGN-RT-NEXT-DAY TO TRUE
-           MOVE 'N'                 TO ZGN-OUT-IMMEDIATE
-           MOVE CAL-OUT-NEXT-DATE   TO ZGN-OUT-VALUE-DATE
-           MOVE RC-BUSINESS-ERROR   TO ZGN-OUT-RETCODE
-           MOVE EC-NEXT-BUSINESS-DAY TO ZGN-OUT-ERROR-CODE.
+           MOVE CAL-OUT-NEXT-DATE TO ZGN-OUT-VALUE-DATE.
        RT-EXIT.
            EXIT.
 
@@ -204,13 +196,15 @@
 
       *----------------------------------------------------------------
       * CANCEL : SEND と同じ追跡番号で取消電文を送る。
-      *   番号を採番し直すと相手行が別取引とみなして取り消せないため、
-      *   呼出元が持っている ZGN-OUT-TRACE-NO をそのまま使う。
+      *   対象は ZGN-IN-TRACE-NO で明示的に受け取る。出力域を暗黙の
+      *   入力にすると、呼出元が結果域を壊さずに持ち回ることに依存する。
       *----------------------------------------------------------------
        CANCEL-MESSAGE SECTION.
        CAN-START.
-           IF ZGN-OUT-TRACE-NO = SPACES
+           IF ZGN-IN-TRACE-NO = SPACES
                MOVE RC-FATAL TO ZGN-OUT-RETCODE
+           ELSE
+               MOVE ZGN-IN-TRACE-NO TO ZGN-OUT-TRACE-NO
            END-IF.
        CAN-EXIT.
            EXIT.
@@ -277,17 +271,10 @@
       *----------------------------------------------------------------
       * ATMCAL 委譲部
       *----------------------------------------------------------------
-       GET-DAY-TYPE SECTION.
-       GDT-START.
-           SET CAL-FN-DAY-TYPE TO TRUE
-           MOVE WS-TS-DATE TO CAL-IN-DATE
-           CALL 'ATMCAL' USING CAL-PARM ATM-SESSION
-           IF CAL-OUT-RETCODE NOT = RC-OK
-               MOVE RC-FATAL     TO ZGN-OUT-RETCODE
-               MOVE EC-SYSTEM-IO TO ZGN-OUT-ERROR-CODE
-           END-IF.
-       GDT-EXIT.
-           EXIT.
+      * 曜日区分は取引の属性として上位が確定済み。ここで判定し直すと
+      * 手数料と全銀経路で別の区分を見る余地が生まれるため、
+      * セッションの値をそのまま使う。
+      *----------------------------------------------------------------
 
        GET-NEXT-BUSINESS SECTION.
        GNB-START.

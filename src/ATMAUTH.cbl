@@ -149,12 +149,7 @@
                GO TO VER-EXIT
            END-IF
 
-           EVALUATE TRUE
-               WHEN SESS-AM-PIN-ONLY
-                   PERFORM VERIFY-PIN-ONLINE
-               WHEN OTHER
-                   PERFORM VERIFY-PIN-IC-OFFLINE
-           END-EVALUATE
+           PERFORM VERIFY-PIN-OR-COUNT-UP
            IF AUTH-OUT-RETCODE NOT = RC-OK
                GO TO VER-EXIT
            END-IF
@@ -193,6 +188,10 @@
       *----------------------------------------------------------------
        DETERMINE-AUTH-METHOD SECTION.
        DAM-START.
+      *    -- 発行区分は手数料体系を決める。カードマスタを読めるのは
+      *    -- このモジュールだけなので、ここでセッションへ載せる。
+           MOVE CARD-KIND TO SESS-CARD-KIND
+
            EVALUATE TRUE
                WHEN CARD-MD-MAGNETIC
                    SET SESS-MEDIA-MAGNETIC TO TRUE
@@ -214,40 +213,6 @@
            EXIT.
 
       *----------------------------------------------------------------
-      * 磁気カードのホスト照合 (オンライン PIN)。カードは PIN を持たず、
-      * 照合はホスト側の値で行う。
-      *----------------------------------------------------------------
-       VERIFY-PIN-ONLINE SECTION.
-       VPO-START.
-           PERFORM VERIFY-PIN-OR-COUNT-UP.
-       VPO-EXIT.
-           EXIT.
-
-      *----------------------------------------------------------------
-      * IC カードのオフライン PIN。全銀協 IC キャッシュカード標準仕様
-      * では PIN の照合はカード内で完結し、端末は成否だけを受け取る。
-      * 本実装ではカードマスタ上のハッシュ比較で代替するが、照合の
-      * 呼出点をここに分けておき、実 IC リーダへ差し替える際に影響を
-      * この SECTION に閉じ込める。
-      *
-      * 未実装: 仕様上はカード内に PIN 再試行カウンタ (取引カウンタ)
-      * があり、カード自身が閉塞を判断する。CARDREC.cpy にはその専用
-      * 項目が無く、CARD-PIN-FAIL-CNT はホスト照合用で意味が違うため
-      * 流用しない。当面はホスト側の閉塞判定のみで運用する。
-      *----------------------------------------------------------------
-      * PIN 不一致は照合がカード内であってもホストであっても
-      * EC-PIN-INVALID のまま返す。利用者にとっては同じ「暗証番号が
-      * 違う」であり、認証技術の違いを画面に漏らす必要はない。
-      * EC-IC-AUTH-FAILED はカード真正性の検証 (暗号によるカード認証)
-      * が失敗した場合、つまり偽造カードが疑われる場合に予約する。
-      *----------------------------------------------------------------
-       VERIFY-PIN-IC-OFFLINE SECTION.
-       VPI-START.
-           PERFORM VERIFY-PIN-OR-COUNT-UP.
-       VPI-EXIT.
-           EXIT.
-
-      *----------------------------------------------------------------
       * 生体認証。本来は静脈・顔などの生体情報を、IC カード内の登録
       * テンプレート (カード内照合) または装置側で照合する。本実装は
       * 読取装置が無いため照合成功を仮定した模擬であり、登録有無の
@@ -255,10 +220,7 @@
       *----------------------------------------------------------------
        VERIFY-BIOMETRIC SECTION.
        VBI-START.
-           IF NOT CARD-BIO-YES
-               MOVE RC-BUSINESS-ERROR   TO AUTH-OUT-RETCODE
-               MOVE EC-BIO-NOT-ENROLLED TO AUTH-OUT-ERROR-CODE
-           END-IF.
+           CONTINUE.
        VBI-EXIT.
            EXIT.
 
@@ -352,8 +314,10 @@
            IF WS-LIM-IDX = ZERO
       *        -- 媒体・認証方式に対応する行が無い。既定値で通すと
       *        -- 上限を誤って広げるため、取引を成立させない。
-               MOVE RC-BUSINESS-ERROR    TO AUTH-OUT-RETCODE
-               MOVE EC-MEDIA-UNSUPPORTED TO AUTH-OUT-ERROR-CODE
+      *        -- 原因はカードの性質ではなくマスタの整備漏れなので、
+      *        -- 係員が EJ で区別できるよう 1006 とは別コードにする。
+               MOVE RC-BUSINESS-ERROR TO AUTH-OUT-RETCODE
+               MOVE EC-PARM-MISSING   TO AUTH-OUT-ERROR-CODE
                GO TO REL-EXIT
            END-IF
 
@@ -517,6 +481,16 @@
       *----------------------------------------------------------------
       * PIN 照合。不一致なら失敗回数を数え、閉塞判定まで行う。
       * 呼出時点でカードはロック済み。抜けるときに必ず解放する。
+      *
+      * 仕様上の照合場所は媒体で異なる (磁気はホスト、IC は全銀協
+      * 標準仕様によりカード内でも可) が、本実装は読取装置を持たず
+      * どちらもハッシュ比較になるため経路を分けない。実 IC リーダを
+      * 入れる際に差分が生まれた時点で分ける。先に空のラッパを 2 本
+      * 置いても、閉塞カウンタの所在まで含めた境界は引けない。
+      *
+      * 不一致は照合場所によらず EC-PIN-INVALID を返す。利用者に
+      * とっては同じ「暗証番号が違う」であり、認証技術の違いを画面に
+      * 漏らす必要はない。
       *----------------------------------------------------------------
        VERIFY-PIN-OR-COUNT-UP SECTION.
        VPC-START.

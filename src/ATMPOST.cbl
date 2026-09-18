@@ -57,11 +57,6 @@
       *    -- 手数料マスタは起動時に一度だけ読んでテーブルに載せる。
       *    -- 手数料算出は取引のたびに走るため、都度 I/O させない。
            05  WS-MAX-FEES             PIC S9(04) COMP VALUE 200.
-      *    -- マスタのカード区分は「自行 'O' / 提携 'P'」で、媒体
-      *    -- (SESS-CARD-MEDIA) とは別の軸。ATMPOST はカードマスタを
-      *    -- 読めないので当面は自行固定とする。将来 ATMAUTH が認証時に
-      *    -- セッションへ載せたら、そこから取る。
-           05  WS-CARD-KIND            PIC X(01) VALUE 'O'.
 
        01  WS-FEE-STATUS               PIC X(02) VALUE '00'.
        01  WS-FEE-LOADED               PIC X(01) VALUE 'N'.
@@ -92,7 +87,6 @@
        COPY 'ATMCONST.cpy'.
        COPY 'ACCTIF.cpy'.
        COPY 'AUTHIF.cpy'.
-       COPY 'CALIF.cpy'.
        COPY 'ZGNIF.cpy'.
 
        LINKAGE SECTION.
@@ -210,9 +204,14 @@
                GO TO TR-EXIT
            END-IF
 
+      *    -- 金融機関コード無指定は自行あて。以降の判定を 1 項で
+      *    -- 済ませるため、ここで一度だけ正規化する。
+           IF SESS-CPTY-BANK-CD = SPACES
+               MOVE CN-OWN-BANK-CD TO SESS-CPTY-BANK-CD
+           END-IF
+
            IF POST-IN-CPTY-ACCT-NO = SESS-ACCT-NO
-              AND (SESS-CPTY-BANK-CD = CN-OWN-BANK-CD
-                   OR SESS-CPTY-BANK-CD = SPACES)
+              AND SESS-CPTY-BANK-CD = CN-OWN-BANK-CD
                MOVE RC-BUSINESS-ERROR TO POST-OUT-RETCODE
                MOVE EC-AMOUNT-INVALID TO POST-OUT-ERROR-CODE
                GO TO TR-EXIT
@@ -221,7 +220,6 @@
            PERFORM CALC-FEE
 
            IF SESS-CPTY-BANK-CD = CN-OWN-BANK-CD
-              OR SESS-CPTY-BANK-CD = SPACES
                PERFORM TRANSFER-IN-HOUSE
            ELSE
                PERFORM TRANSFER-VIA-ZENGIN
@@ -268,18 +266,8 @@
       *----------------------------------------------------------------
        TRANSFER-VIA-ZENGIN SECTION.
        TVZ-START.
-           SET  ZGN-FN-ROUTE TO TRUE
-           MOVE SESS-CPTY-BANK-CD   TO ZGN-IN-BANK-CD
-           MOVE POST-IN-CPTY-ACCT-NO TO ZGN-IN-ACCT-NO
-           MOVE POST-IN-AMOUNT      TO ZGN-IN-AMOUNT
-           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
-
-      *    -- 翌営業日扱いは取引不成立ではない。受け付けたうえで
-      *    -- 入金日を利用者に知らせる。
-           IF ZGN-OUT-RETCODE NOT = RC-OK
-              AND ZGN-OUT-ERROR-CODE NOT = EC-NEXT-BUSINESS-DAY
-               MOVE ZGN-OUT-RETCODE    TO POST-OUT-RETCODE
-               MOVE ZGN-OUT-ERROR-CODE TO POST-OUT-ERROR-CODE
+           PERFORM CHECK-ZENGIN-ROUTE
+           IF POST-OUT-RETCODE NOT = RC-OK
                GO TO TVZ-EXIT
            END-IF
 
@@ -288,39 +276,81 @@
                GO TO TVZ-EXIT
            END-IF
 
-           SET ZGN-FN-SEND TO TRUE
-           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
-           IF ZGN-OUT-RETCODE = RC-OK
-               GO TO TVZ-EXIT
-           END-IF
-
-           IF ZGN-OUT-ERROR-CODE = EC-ZENGIN-TIMEOUT
-               PERFORM CANCEL-ZENGIN-MESSAGE
-           ELSE
-               MOVE ZGN-OUT-ERROR-CODE TO POST-OUT-ERROR-CODE
-               PERFORM COMPENSATE-OWN-ACCOUNT
+           PERFORM REMIT-TO-ZENGIN
+           IF POST-OUT-RETCODE NOT = RC-OK
+               PERFORM UNDO-ZENGIN-REMITTANCE
            END-IF.
        TVZ-EXIT.
            EXIT.
 
-       CANCEL-ZENGIN-MESSAGE SECTION.
-       CZM-START.
-           SET ZGN-FN-CANCEL TO TRUE
+      *----------------------------------------------------------------
+      * 相手行の確認と経路の確定。自行あての CHECK-COUNTERPARTY に
+      * 相当する。翌営業日扱いは失敗ではないので、経路と入金日を
+      * 受け取ってそのまま先へ進む。
+      *----------------------------------------------------------------
+       CHECK-ZENGIN-ROUTE SECTION.
+       CZR-START.
+           SET  ZGN-FN-ROUTE TO TRUE
+           MOVE SESS-CPTY-BANK-CD    TO ZGN-IN-BANK-CD
+           MOVE POST-IN-CPTY-ACCT-NO TO ZGN-IN-ACCT-NO
+           MOVE POST-IN-AMOUNT       TO ZGN-IN-AMOUNT
+           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
+
+           IF ZGN-OUT-RETCODE NOT = RC-OK
+               MOVE ZGN-OUT-RETCODE    TO POST-OUT-RETCODE
+               MOVE ZGN-OUT-ERROR-CODE TO POST-OUT-ERROR-CODE
+               GO TO CZR-EXIT
+           END-IF
+
+           MOVE ZGN-OUT-BANK-NAME  TO POST-OUT-CPTY-BANK-NAME
+           MOVE ZGN-OUT-VALUE-DATE TO POST-OUT-VALUE-DATE
+           MOVE ZGN-OUT-VALUE-DATE TO SESS-VALUE-DATE.
+       CZR-EXIT.
+           EXIT.
+
+      *    -- 為替電文の送信。自行あての CREDIT-COUNTERPARTY に相当する。
+       REMIT-TO-ZENGIN SECTION.
+       RTZ-START.
+           SET ZGN-FN-SEND TO TRUE
+           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
+      *    -- 追跡番号はタイムアウト時にも返る。EJ に残さないと
+      *    -- 日次突合の鍵が消えるので、成否によらず控える。
+           MOVE ZGN-OUT-TRACE-NO TO SESS-TRACE-NO
+           IF ZGN-OUT-RETCODE NOT = RC-OK
+               MOVE ZGN-OUT-RETCODE    TO POST-OUT-RETCODE
+               MOVE ZGN-OUT-ERROR-CODE TO POST-OUT-ERROR-CODE
+           END-IF.
+       RTZ-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 送信に失敗したときの巻き戻し。
+      *
+      * タイムアウトは「失敗」ではなく「成否不明」で、相手行が受電済み
+      * の可能性がある。引落をそのまま戻すと二重入金になるため、まず
+      * 取消電文を送る。取消が通れば戻し、通らなければ戻さずに
+      * RC-FATAL を返し、不確定取引として日次突合に委ねる。
+      *----------------------------------------------------------------
+       UNDO-ZENGIN-REMITTANCE SECTION.
+       UZR-START.
+           IF POST-OUT-ERROR-CODE NOT = EC-ZENGIN-TIMEOUT
+      *        -- 明確な拒否。相手行は受電していないので戻してよい。
+               PERFORM COMPENSATE-OWN-ACCOUNT
+               GO TO UZR-EXIT
+           END-IF
+
+           SET  ZGN-FN-CANCEL TO TRUE
+           MOVE ZGN-OUT-TRACE-NO TO ZGN-IN-TRACE-NO
            CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
 
            IF ZGN-OUT-RETCODE = RC-OK
-      *        -- 取消が通ったので引落を戻せる
-               MOVE EC-ZENGIN-TIMEOUT TO POST-OUT-ERROR-CODE
                PERFORM COMPENSATE-OWN-ACCOUNT
                MOVE RC-BUSINESS-ERROR TO POST-OUT-RETCODE
-               MOVE EC-ZENGIN-TIMEOUT TO POST-OUT-ERROR-CODE
            ELSE
-      *        -- 取消も届かない。相手行に入金されたか判らないため
-      *        -- 引落は戻さない。日次突合と係員対応に委ねる。
-               MOVE RC-FATAL          TO POST-OUT-RETCODE
-               MOVE EC-ZENGIN-TIMEOUT TO POST-OUT-ERROR-CODE
-           END-IF.
-       CZM-EXIT.
+               MOVE RC-FATAL TO POST-OUT-RETCODE
+           END-IF
+           MOVE EC-ZENGIN-TIMEOUT TO POST-OUT-ERROR-CODE.
+       UZR-EXIT.
            EXIT.
 
       *----------------------------------------------------------------
@@ -548,11 +578,10 @@
        FEE-START.
            MOVE ZERO TO POST-OUT-FEE
            PERFORM LOAD-FEE-MASTER
-           PERFORM RESOLVE-DAY-TYPE
            PERFORM EXTRACT-HHMM
 
            PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > WS-FEE-CNT
-               IF WS-FEE-CARD-KIND(WS-I) = WS-CARD-KIND
+               IF WS-FEE-CARD-KIND(WS-I) = SESS-CARD-KIND
                   AND WS-FEE-DAY-TYPE(WS-I) = SESS-DAY-TYPE
                   AND WS-FEE-TXN-TYPE(WS-I) = SESS-TXN-TYPE
                   AND WS-HHMM >= WS-FEE-FROM-HHMM(WS-I)
@@ -564,21 +593,6 @@
            END-PERFORM
            MOVE POST-OUT-FEE TO SESS-TXN-FEE.
        FEE-EXIT.
-           EXIT.
-
-      *----------------------------------------------------------------
-      * 曜日区分の解決。判定規則 (祝日は日曜扱い等) は ATMCAL が持つ。
-      * 結果をセッションにも残すのは、EJ と上位が同じ区分を見るため。
-      *----------------------------------------------------------------
-       RESOLVE-DAY-TYPE SECTION.
-       RDT-START.
-           SET CAL-FN-DAY-TYPE TO TRUE
-           MOVE SESS-BUSINESS-DATE TO CAL-IN-DATE
-           CALL 'ATMCAL' USING CAL-PARM ATM-SESSION
-           IF CAL-OUT-RETCODE = RC-OK
-               MOVE CAL-OUT-DAY-TYPE TO SESS-DAY-TYPE
-           END-IF.
-       RDT-EXIT.
            EXIT.
 
       *----------------------------------------------------------------
@@ -692,9 +706,7 @@
        CLOSE-ACCT-FILE SECTION.
        CAF-START.
            SET ACCT-FN-CLOSE TO TRUE
-           CALL 'ATMACCT' USING ACCT-PARM ATM-SESSION
-           SET ZGN-FN-CLOSE TO TRUE
-           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION.
+           CALL 'ATMACCT' USING ACCT-PARM ATM-SESSION.
        CAF-EXIT.
            EXIT.
 

@@ -18,6 +18,9 @@
            05  ZGN-IN-BANK-CD          PIC X(04).
            05  ZGN-IN-ACCT-NO          PIC X(10).
            05  ZGN-IN-AMOUNT           PIC S9(13)V99 SIGN LEADING SEPARATE.
+      *    -- CANCEL の対象。SEND が返した追跡番号をそのまま渡す。
+      *    -- 採番し直すと相手行が別取引とみなして取り消せない。
+           05  ZGN-IN-TRACE-NO         PIC X(12).
            05  ZGN-OUT-RETCODE         PIC S9(04) COMP.
            05  ZGN-OUT-ERROR-CODE      PIC X(04).
            05  ZGN-OUT-BANK-NAME       PIC X(30).
@@ -31,7 +34,5 @@
                88  ZGN-RT-NEXT-DAY             VALUE 'N'.
       *    -- 実際に資金が動く日
            05  ZGN-OUT-VALUE-DATE      PIC 9(08).
-      *    -- 即時着金したか (N のときは 'N')
-           05  ZGN-OUT-IMMEDIATE       PIC X(01).
       *    -- 送信した電文の追跡番号。取消電文で同じ番号を使う
            05  ZGN-OUT-TRACE-NO        PIC X(12).

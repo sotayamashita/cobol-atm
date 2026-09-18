@@ -21,6 +21,12 @@
            05  SESS-CARD-MEDIA         PIC X(01).
                88  SESS-MEDIA-MAGNETIC         VALUE 'M'.
                88  SESS-MEDIA-IC               VALUE 'I'.
+      *    -- 発行区分。自行カードと提携行カードで手数料体系が違う。
+      *    -- カードマスタを読めるのは ATMAUTH だけなので、認証時に
+      *    -- ここへ載せて ATMPOST の手数料計算へ渡す。
+           05  SESS-CARD-KIND          PIC X(01).
+               88  SESS-CK-OWN                 VALUE 'O'.
+               88  SESS-CK-PARTNER             VALUE 'P'.
       *    -- 成立した認証方式。限度額はこれで変わる。
       *       P = 暗証番号のみ (ホスト照合)
       *       O = IC オフライン PIN (カード内で照合)
@@ -41,14 +47,18 @@
            05  SESS-TXN-FEE            PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-CPTY-BANK-CD       PIC X(04).
            05  SESS-CPTY-ACCT-NO       PIC X(10).
-      *    -- 当日の曜日区分 (ATMCAL が設定)。手数料と全銀接続の
-      *    -- 判定はどちらもこれを見る。
+      *    -- 当日の曜日区分。取引の属性なので、営業日・時刻を確定する
+      *    -- のと同じ場所 (ATMMAIN の取引開始) で一度だけ決める。
+      *    -- 手数料も全銀接続も下位は読むだけ。
            05  SESS-DAY-TYPE           PIC X(01).
                88  SESS-DT-WEEKDAY             VALUE 'W'.
                88  SESS-DT-SATURDAY            VALUE 'S'.
                88  SESS-DT-HOLIDAY             VALUE 'H'.
            05  SESS-BAL-BEFORE         PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-BAL-AFTER          PIC S9(13)V99 SIGN LEADING SEPARATE.
+      *    -- 他行あて為替の追跡番号と入金日。EJ と画面が同じ値を見る。
+           05  SESS-TRACE-NO           PIC X(12).
+           05  SESS-VALUE-DATE         PIC 9(08).
       *    -- 直近の結果 (EJ への出力と画面表示に使う)
            05  SESS-ERROR-CODE         PIC X(04).
            05  SESS-ERROR-MESSAGE      PIC X(60).

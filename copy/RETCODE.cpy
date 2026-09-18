@@ -18,11 +18,8 @@
            05  EC-CARD-CAPTURED        PIC X(04) VALUE '1003'.
            05  EC-CARD-LOCKED          PIC X(04) VALUE '1004'.
            05  EC-PIN-INVALID          PIC X(04) VALUE '1005'.
-      *    -- 媒体・認証方式系 (11xx)
-           05  EC-MEDIA-UNSUPPORTED    PIC X(04) VALUE '1101'.
-           05  EC-BIO-NOT-ENROLLED     PIC X(04) VALUE '1102'.
-           05  EC-BIO-MISMATCH         PIC X(04) VALUE '1103'.
-           05  EC-IC-AUTH-FAILED       PIC X(04) VALUE '1104'.
+      *    -- 媒体系。カード系と同じ粒度なのでサブ帯を作らない。
+           05  EC-MEDIA-UNSUPPORTED    PIC X(04) VALUE '1006'.
       *    -- 口座系 (2xxx)
            05  EC-ACCT-UNKNOWN         PIC X(04) VALUE '2001'.
            05  EC-ACCT-FROZEN          PIC X(04) VALUE '2002'.
@@ -46,8 +43,10 @@
            05  EC-BANK-UNKNOWN         PIC X(04) VALUE '5001'.
            05  EC-BANK-OFFLINE         PIC X(04) VALUE '5002'.
            05  EC-ZENGIN-TIMEOUT       PIC X(04) VALUE '5003'.
-           05  EC-NEXT-BUSINESS-DAY    PIC X(04) VALUE '5004'.
 
       *    -- システム系 (9xxx)
            05  EC-SYSTEM-IO            PIC X(04) VALUE '9001'.
            05  EC-SYSTEM-BUSY          PIC X(04) VALUE '9002'.
+      *    -- パラメタマスタの整備漏れ。カードの性質 (1006) とは原因も
+      *    -- 対処も違うので、係員が EJ で区別できるよう別コードにする。
+           05  EC-PARM-MISSING         PIC X(04) VALUE '9003'.

@@ -11,7 +11,6 @@
                88  CAL-FN-DAY-TYPE             VALUE 'DAYTYPE '.
       *        -- 指定日の翌営業日 (土日祝を飛ばす)
                88  CAL-FN-NEXT-BUSINESS        VALUE 'NEXTBIZ '.
-               88  CAL-FN-CLOSE                VALUE 'CLOSE   '.
            05  CAL-IN-DATE             PIC 9(08).
            05  CAL-OUT-RETCODE         PIC S9(04) COMP.
            05  CAL-OUT-DAY-TYPE        PIC X(01).

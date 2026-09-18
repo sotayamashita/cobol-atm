@@ -34,7 +34,6 @@
        01  WS-I                     PIC S9(04) COMP VALUE ZERO.
        01  WS-VERDICT               PIC X(04) VALUE SPACES.
        01  WS-NOTE                  PIC X(60) VALUE SPACES.
-       01  WS-ED-DATE               PIC 9(08) VALUE ZERO.
        01  WS-FAILED                PIC 9(04) VALUE ZERO.
 
        COPY 'CALIF.cpy'.
@@ -102,15 +101,14 @@
            SET  CAL-FN-NEXT-BUSINESS TO TRUE
            MOVE 20260919 TO CAL-IN-DATE
            CALL 'ATMCAL' USING CAL-PARM ATM-SESSION
-           MOVE CAL-OUT-NEXT-DATE TO WS-ED-DATE
 
-           IF WS-ED-DATE = 20260924
+           IF CAL-OUT-NEXT-DATE = 20260924
                MOVE ' OK ' TO WS-VERDICT
            ELSE
                MOVE ' NG ' TO WS-VERDICT
                ADD 1 TO WS-FAILED
            END-IF
-           DISPLAY WS-VERDICT '20260919 の翌営業日=' WS-ED-DATE
+           DISPLAY WS-VERDICT '20260919 の翌営業日=' CAL-OUT-NEXT-DATE
                    ' (期待 20260924)'.
        CNB-EXIT.
            EXIT.

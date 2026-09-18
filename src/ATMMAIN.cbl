@@ -61,6 +61,8 @@
        COPY 'POSTIF.cpy'.
        COPY 'CASHIF.cpy'.
        COPY 'JRNLIF.cpy'.
+       COPY 'CALIF.cpy'.
+       COPY 'ZGNIF.cpy'.
 
        PROCEDURE DIVISION.
 
@@ -75,6 +77,10 @@
 
        INITIALIZE-TERMINAL SECTION.
        INIT-START.
+      *    -- 共有域は必ず初期化してから使う。未初期化のままだと
+      *    -- 英数字項目にバイナリゼロが残り、行順編成の EJ への
+      *    -- 書込みが不正文字として拒否される (file status 71)。
+           INITIALIZE ATM-SESSION
            MOVE CN-ATM-ID TO SESS-ATM-ID
            PERFORM REFRESH-CLOCK
 
@@ -104,6 +110,8 @@
            CALL 'ATMAUTH' USING AUTH-PARM ATM-SESSION
            SET CASH-FN-CLOSE TO TRUE
            CALL 'ATMCASH' USING CASH-PARM ATM-SESSION
+           SET ZGN-FN-CLOSE TO TRUE
+           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
            SET JRNL-FN-CLOSE TO TRUE
            CALL 'ATMJRNL' USING JRNL-PARM ATM-SESSION
            DISPLAY 'ご利用ありがとうございました。'.
@@ -420,6 +428,7 @@
 
            EVALUATE POST-OUT-RETCODE
                WHEN RC-OK
+                   PERFORM SHOW-TRANSFER-DETAIL
                    PERFORM SHOW-BALANCE-AFTER
                    PERFORM WRITE-JRNL-END-OK
                WHEN RC-FATAL
@@ -480,11 +489,30 @@
            MOVE ZERO   TO SESS-BAL-BEFORE SESS-BAL-AFTER
            MOVE EC-NONE TO SESS-ERROR-CODE
            MOVE SPACES TO SESS-CPTY-ACCT-NO
+           MOVE SPACES TO SESS-CPTY-BANK-CD
            PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > CN-CASSETTE-CNT
                MOVE ZERO TO SESS-DSP-CNT(WS-I)
                MOVE ZERO TO SESS-DSP-DENOM(WS-I)
-           END-PERFORM.
+           END-PERFORM
+
+      *    -- 曜日区分は営業日・時刻と同じく取引の属性なので、ここで
+      *    -- 一度だけ確定させる。手数料計算の副作用にすると、照会や
+      *    -- 入金のように手数料を出さない取引で空欄になってしまう。
+           PERFORM RESOLVE-DAY-TYPE.
        ST-EXIT.
+           EXIT.
+
+       RESOLVE-DAY-TYPE SECTION.
+       RDT-START.
+           SET  CAL-FN-DAY-TYPE TO TRUE
+           MOVE SESS-BUSINESS-DATE TO CAL-IN-DATE
+           CALL 'ATMCAL' USING CAL-PARM ATM-SESSION
+           IF CAL-OUT-RETCODE = RC-OK
+               MOVE CAL-OUT-DAY-TYPE TO SESS-DAY-TYPE
+           ELSE
+               MOVE SPACES TO SESS-DAY-TYPE
+           END-IF.
+       RDT-EXIT.
            EXIT.
 
        ACCEPT-AMOUNT SECTION.
@@ -509,6 +537,25 @@
            MOVE POST-OUT-BAL-AFTER  TO SESS-BAL-AFTER
            MOVE POST-OUT-ERROR-CODE TO SESS-ERROR-CODE.
        CPR-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 他行あては入金日が当日とは限らない。相手行がモアタイム未参加
+      * なら翌営業日になるので、受け付けた時点で利用者に知らせる。
+      *----------------------------------------------------------------
+       SHOW-TRANSFER-DETAIL SECTION.
+       STD-START.
+           IF POST-OUT-CPTY-BANK-NAME = SPACES
+               GO TO STD-EXIT
+           END-IF
+           DISPLAY ' '
+           DISPLAY '  お振込先  : '
+                   FUNCTION TRIM (POST-OUT-CPTY-BANK-NAME)
+           IF POST-OUT-VALUE-DATE NOT = SESS-BUSINESS-DATE
+               DISPLAY '  ご入金日  : ' POST-OUT-VALUE-DATE
+                       ' (翌営業日のお取扱いとなります)'
+           END-IF.
+       STD-EXIT.
            EXIT.
 
        SHOW-BALANCE-AFTER SECTION.
@@ -558,15 +605,6 @@
                    MOVE '暗証番号が違います' TO SESS-ERROR-MESSAGE
                WHEN EC-MEDIA-UNSUPPORTED
                    MOVE 'このカードはお取扱いできません'
-                       TO SESS-ERROR-MESSAGE
-               WHEN EC-BIO-NOT-ENROLLED
-                   MOVE '生体認証のご登録がありません'
-                       TO SESS-ERROR-MESSAGE
-               WHEN EC-BIO-MISMATCH
-                   MOVE '生体認証を確認できませんでした'
-                       TO SESS-ERROR-MESSAGE
-               WHEN EC-IC-AUTH-FAILED
-                   MOVE 'このカードは確認できませんでした'
                        TO SESS-ERROR-MESSAGE
                WHEN EC-ACCT-UNKNOWN
                    MOVE '口座が見つかりません' TO SESS-ERROR-MESSAGE

@@ -41,6 +41,7 @@
        01  WS-FAILED                PIC 9(04) VALUE ZERO.
 
        COPY 'ZGNIF.cpy'.
+       COPY 'CALIF.cpy'.
        COPY 'ATMSESS.cpy'.
 
        PROCEDURE DIVISION.
@@ -64,6 +65,9 @@
        ROC-START.
            MOVE WS-CASE-TS(WS-I) TO SESS-TIMESTAMP
            COMPUTE SESS-BUSINESS-DATE = WS-CASE-TS(WS-I) / 1000000
+      *    -- 曜日区分は本来 ATMMAIN が取引開始時に確定させる。
+      *    -- 本体を経由しないドライバなので、ここで同じ手順を踏む。
+           PERFORM RESOLVE-DAY-TYPE
 
            SET  ZGN-FN-ROUTE TO TRUE
            MOVE WS-CASE-BANK(WS-I) TO ZGN-IN-BANK-CD
@@ -83,9 +87,17 @@
                    ' ' WS-CASE-TS(WS-I)
                    ' 経路=' ZGN-OUT-ROUTE
                    ' 入金日=' ZGN-OUT-VALUE-DATE
-                   ' 即時=' ZGN-OUT-IMMEDIATE
                    ' ' FUNCTION TRIM (WS-NOTE).
        ROC-EXIT.
+           EXIT.
+
+       RESOLVE-DAY-TYPE SECTION.
+       RDT-START.
+           SET  CAL-FN-DAY-TYPE TO TRUE
+           MOVE SESS-BUSINESS-DATE TO CAL-IN-DATE
+           CALL 'ATMCAL' USING CAL-PARM ATM-SESSION
+           MOVE CAL-OUT-DAY-TYPE TO SESS-DAY-TYPE.
+       RDT-EXIT.
            EXIT.
 
        SET-NOTE SECTION.
@@ -114,6 +126,7 @@
        CT-START.
            MOVE 20260917103000 TO SESS-TIMESTAMP
            MOVE 20260917       TO SESS-BUSINESS-DATE
+           PERFORM RESOLVE-DAY-TYPE
            SET  ZGN-FN-SEND TO TRUE
            MOVE '0005'         TO ZGN-IN-BANK-CD
            MOVE 39999.00       TO ZGN-IN-AMOUNT

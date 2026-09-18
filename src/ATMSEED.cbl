@@ -347,11 +347,11 @@
       *    -- 持つ。他行あての加算は全銀接続の組込み時に見直す。
        WRITE-FEE-TRANSFER SECTION.
        WFT-START.
-           MOVE SPACES TO FEE-RECORD
-           MOVE 'O'  TO FEE-CARD-KIND
+           PERFORM SET-FEE-DEFAULTS
+           SET  FEE-CK-OWN TO TRUE
            MOVE 'TR' TO FEE-TXN-TYPE
 
-           MOVE 'W'  TO FEE-DAY-TYPE
+           SET  FEE-DT-WEEKDAY TO TRUE
            MOVE 0000 TO FEE-FROM-HHMM
            MOVE 0845 TO FEE-TO-HHMM
            MOVE 220  TO FEE-AMOUNT

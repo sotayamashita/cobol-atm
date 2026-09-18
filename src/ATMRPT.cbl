@@ -190,6 +190,7 @@
                WHEN RCN-TP-ZENGIN-UNKNOWN   PERFORM DETAIL-ZENGIN
                WHEN RCN-TP-CASH-DIFF        PERFORM DETAIL-CASH-DIFF
                WHEN RCN-TP-REVERSAL-FAILED  PERFORM DETAIL-REVERSAL
+               WHEN RCN-TP-NOT-COUNTED      PERFORM DETAIL-NOT-COUNTED
                WHEN OTHER                   PERFORM DETAIL-UNKNOWN
            END-EVALUATE
 
@@ -273,6 +274,19 @@
        DR-EXIT.
            EXIT.
 
+      *    -- 未計数: 差異ではなく「差異が判らない」。理論値だけ出し、
+      *    -- 実査欄は書かない。ゼロ枚と読めてしまうため。
+       DETAIL-NOT-COUNTED SECTION.
+       DNC-START.
+           MOVE RCN-EXPECTED TO WS-ED-EXPECTED
+           STRING '  [NC] 実査未計数  理論=' DELIMITED BY SIZE
+                  WS-ED-EXPECTED            DELIMITED BY SIZE
+                  ' 実査=(未計数) 券種額面=' DELIMITED BY SIZE
+                  WS-ED-AMOUNT              DELIMITED BY SIZE
+               INTO WS-LINE.
+       DNC-EXIT.
+           EXIT.
+
       *    -- 未知の種別。ここで捨てると係員が異常に気付けないので、
       *    -- 読める形にならなくても種別と取引 ID だけは必ず出す。
        DETAIL-UNKNOWN SECTION.
@@ -321,7 +335,7 @@
                    INTO WS-LINE
            ELSE
                STRING '  現金実査    : 未実施 '
-                      '(実枚数が入力されなかったため突合していません)'
+                      '(数えていないカセットは NC で示す)'
                    DELIMITED BY SIZE INTO WS-LINE
            END-IF
            PERFORM WRITE-LINE

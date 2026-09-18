@@ -17,6 +17,11 @@
                88  RCN-TP-CASH-DIFF            VALUE 'CD'.
       *        -- 取消が失敗したまま残った取引。
                88  RCN-TP-REVERSAL-FAILED      VALUE 'RF'.
+      *        -- 実査で数えられなかったカセット。実査を試みたのに
+      *        -- 一部が漏れた場合だけ出す。どれが漏れたかを帳票に
+      *        -- 残さないと、翌朝に帳票を読む係員が再実査の範囲を
+      *        -- 決められない。
+               88  RCN-TP-NOT-COUNTED          VALUE 'NC'.
            05  RCN-TXN-ID              PIC X(12).
            05  RCN-SESSION-ID          PIC X(12).
            05  RCN-TIMESTAMP           PIC 9(14).

@@ -83,16 +83,17 @@
            05  WS-OVERFLOW             PIC X(01) VALUE 'N'.
            05  WS-ABORT                PIC X(01) VALUE 'N'.
            05  WS-ACTION               PIC X(01) VALUE 'N'.
-      *    -- 実査枚数と、それが揃ったか。揃わない間は 'N' のままで、
-      *    -- 突合そのものを行わない。
-           05  WS-COUNTED              PIC X(01) VALUE 'N'.
+      *    -- 実査枚数と、カセットごとに数えられたか。ゼロ枚と未計数を
+      *    -- 区別するため、値とは別にフラグを持つ。
            05  WS-IN-COUNT OCCURS 4 TIMES PIC 9(05).
-      *    -- 実枚数が入力されたカセットの本数。ゼロ枚と未計数を
-      *    -- 区別するために、値とは別に数える。
+           05  WS-IN-GIVEN OCCURS 4 TIMES PIC X(01).
            05  WS-GIVEN-CNT            PIC S9(04) COMP VALUE ZERO.
-           05  WS-IN-LINE              PIC X(12) VALUE SPACES.
-           05  WS-NUM-SIGNED           PIC S9(10) VALUE ZERO.
-           05  WS-ED-DENOM             PIC ZZ,ZZ9.
+      *    -- 全本揃ったか。帳票の「実施済/未実施」はこれで決まる。
+           05  WS-COUNTED              PIC X(01) VALUE 'N'.
+      *    -- 帳簿値の退避。CASH-PARM は次の呼出で上書きされる引数域
+      *    -- なので、後で使う値はここへ写す。
+           05  WS-TH-DENOM OCCURS 4 TIMES PIC 9(06).
+           05  WS-TH-CNT   OCCURS 4 TIMES PIC 9(05).
       *    -- 当日の現金増減。CASH-PARM は呼出のたびに上書きされる
       *    -- 引数域なので、後で帳票に出す値はここへ退避する。
            05  WS-DISPENSED            PIC S9(13)V99 VALUE ZERO.
@@ -110,6 +111,13 @@
        COPY 'RPTIF.cpy'.
        COPY 'CLSIF.cpy'.
 
+       01  WS-INPUT.
+           05  WS-IN-LINE              PIC X(12) VALUE SPACES.
+           05  WS-NUM-SIGNED           PIC S9(10) VALUE ZERO.
+
+       01  WS-EDIT.
+           05  WS-ED-DENOM             PIC ZZ,ZZ9.
+
        01  WS-DATETIME.
            05  WS-CURRENT-DATE.
                10  WS-CD-YYYYMMDD      PIC 9(08).
@@ -125,6 +133,13 @@
                PERFORM FINISH-ABORTED
                STOP RUN
            END-IF
+
+      *    -- 対話は先に済ませる。締めの実行中フラグを立てたまま人の
+      *    -- 入力を待つ時間は短いほどよい。途中で抜けられるとフラグが
+      *    -- 残り、係員による解除が要る。装填・保存年限管理のバッチも
+      *    -- 対話フェーズと更新フェーズを分けている。
+           PERFORM READ-CASH-BOOK
+           PERFORM READ-COUNTED-NOTES
 
            PERFORM SCAN-JOURNAL
            PERFORM RECONCILE-CASH
@@ -373,39 +388,80 @@
       *   比較はここで行う。判定を現金機構に持たせると、実査の運用が
       *   変わるたびに機構側を直すことになるため。
       *================================================================
-       RECONCILE-CASH SECTION.
-       RC-START.
+       READ-CASH-BOOK SECTION.
+       RCB-START.
            SET CASH-FN-THEORY TO TRUE
            CALL 'ATMCASH' USING CASH-PARM ATM-SESSION
            IF CASH-OUT-RETCODE NOT = RC-OK
                DISPLAY '*** 現金機構の帳簿を読めません。'
-               GO TO RC-EXIT
-           END-IF
-
-      *    -- 引数域は次の呼出で上書きされるので、帳票に出す値は
-      *    -- ここで退避しておく。
-           MOVE CASH-OUT-DISPENSED TO WS-DISPENSED
-           MOVE CASH-OUT-DEPOSITED TO WS-DEPOSITED
-
-           PERFORM READ-COUNTED-NOTES
-           IF WS-COUNTED NOT = 'Y'
-               GO TO RC-EXIT
+               GO TO RCB-EXIT
            END-IF
 
            PERFORM VARYING WS-I FROM 1 BY 1
                    UNTIL WS-I > CN-CASSETTE-CNT
-               IF WS-IN-COUNT(WS-I) NOT = CASH-TH-CNT(WS-I)
-                   MOVE SPACES TO RECON-RECORD
-                   SET  RCN-TP-CASH-DIFF TO TRUE
-                   MOVE CASH-TH-DENOM(WS-I) TO RCN-AMOUNT
-                   MOVE CASH-TH-CNT(WS-I)   TO RCN-EXPECTED
-                   MOVE WS-IN-COUNT(WS-I)   TO RCN-ACTUAL
-                   MOVE EC-CASH-COUNT-DIFF  TO RCN-ERROR-CODE
-                   PERFORM ADD-RECON
-                   ADD 1 TO WS-DIFF-CNT
+               MOVE CASH-TH-DENOM(WS-I) TO WS-TH-DENOM(WS-I)
+               MOVE CASH-TH-CNT(WS-I)   TO WS-TH-CNT(WS-I)
+           END-PERFORM
+           MOVE CASH-OUT-DISPENSED TO WS-DISPENSED
+           MOVE CASH-OUT-DEPOSITED TO WS-DEPOSITED.
+       RCB-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 現金の突合。数えたカセットだけを突き合わせる。
+      *
+      * 一部しか数えていない場合でも、数えた分の差異は出す。差異は当日計
+      * をクリアする前にしか取れないので、ここで捨てると二度と検出できな
+      * い。数えていないカセットは NC として明細に残し、どれが漏れたかを
+      * 帳票で判るようにする。
+      *
+      * ただし「実施済」とは記録しない。全本揃って初めて実査である。
+      *----------------------------------------------------------------
+       RECONCILE-CASH SECTION.
+       RC-START.
+           PERFORM VARYING WS-I FROM 1 BY 1
+                   UNTIL WS-I > CN-CASSETTE-CNT
+               IF WS-IN-GIVEN(WS-I) = 'Y'
+                   PERFORM COMPARE-COUNTED-CASSETTE
+               ELSE
+                   IF WS-GIVEN-CNT > ZERO
+      *                -- 実査を試みたのに漏れたカセットだけ挙げる。
+      *                -- 一本も数えていない日は実査そのものが未実施で、
+      *                -- 全カセットを並べても意味が無い。
+                       PERFORM NOTE-UNCOUNTED-CASSETTE
+                   END-IF
                END-IF
            END-PERFORM.
        RC-EXIT.
+           EXIT.
+
+       COMPARE-COUNTED-CASSETTE SECTION.
+       CCC-START.
+           IF WS-IN-COUNT(WS-I) = WS-TH-CNT(WS-I)
+               GO TO CCC-EXIT
+           END-IF
+           MOVE SPACES TO RECON-RECORD
+           SET  RCN-TP-CASH-DIFF TO TRUE
+           MOVE WS-TH-DENOM(WS-I)  TO RCN-AMOUNT
+           MOVE WS-TH-CNT(WS-I)    TO RCN-EXPECTED
+           MOVE WS-IN-COUNT(WS-I)  TO RCN-ACTUAL
+           MOVE EC-CASH-COUNT-DIFF TO RCN-ERROR-CODE
+           PERFORM ADD-RECON
+           ADD 1 TO WS-DIFF-CNT.
+       CCC-EXIT.
+           EXIT.
+
+       NOTE-UNCOUNTED-CASSETTE SECTION.
+       NUC-START.
+           MOVE SPACES TO RECON-RECORD
+           SET  RCN-TP-NOT-COUNTED TO TRUE
+           MOVE WS-TH-DENOM(WS-I)  TO RCN-AMOUNT
+           MOVE WS-TH-CNT(WS-I)    TO RCN-EXPECTED
+           MOVE ZERO               TO RCN-ACTUAL
+           MOVE EC-CASH-NOT-COUNTED TO RCN-ERROR-CODE
+           PERFORM ADD-RECON
+           ADD 1 TO WS-DIFF-CNT.
+       NUC-EXIT.
            EXIT.
 
       *----------------------------------------------------------------
@@ -435,7 +491,8 @@
            PERFORM VARYING WS-I FROM 1 BY 1
                    UNTIL WS-I > CN-CASSETTE-CNT
                MOVE ZERO TO WS-IN-COUNT(WS-I)
-               MOVE CASH-TH-DENOM(WS-I) TO WS-ED-DENOM
+               MOVE 'N'  TO WS-IN-GIVEN(WS-I)
+               MOVE WS-TH-DENOM(WS-I) TO WS-ED-DENOM
                DISPLAY '    ' WS-ED-DENOM ' 円券の実枚数:'
       *        -- 入力前に必ず消す。入力が尽きた場合 ACCEPT は項目を
       *        -- 変えないため、前のカセットの入力が残る。
@@ -446,7 +503,14 @@
                END-IF
            END-PERFORM
 
-           PERFORM JUDGE-COUNT-COMPLETE.
+      *    -- 全本揃って初めて実査。一部だけ数えた状態を「実施」と
+      *    -- 記録すると、数えていないカセットの差異を見落としたまま
+      *    -- 問題なしと読める帳票になる。
+           IF WS-GIVEN-CNT = CN-CASSETTE-CNT
+               MOVE 'Y' TO WS-COUNTED
+           ELSE
+               DISPLAY '  現金実査: 未実施'
+           END-IF.
        RCN-EXIT.
            EXIT.
 
@@ -467,24 +531,10 @@
            END-IF
 
            MOVE WS-NUM-SIGNED TO WS-IN-COUNT(WS-I)
+           MOVE 'Y'           TO WS-IN-GIVEN(WS-I)
            ADD 1 TO WS-GIVEN-CNT.
        PCN-EXIT.
            EXIT.
-
-       JUDGE-COUNT-COMPLETE SECTION.
-       JCC-START.
-           EVALUATE TRUE
-               WHEN WS-GIVEN-CNT = ZERO
-                   DISPLAY '  現金実査: 未実施'
-               WHEN WS-GIVEN-CNT < CN-CASSETTE-CNT
-                   DISPLAY '  現金実査: 未実施'
-                           ' (一部のカセットが未計数です)'
-               WHEN OTHER
-                   MOVE 'Y' TO WS-COUNTED
-           END-EVALUATE.
-       JCC-EXIT.
-           EXIT.
-
       *================================================================
       * (4) 帳票
       *================================================================
@@ -639,7 +689,7 @@
            IF WS-COUNTED = 'Y'
                DISPLAY '  現金差異  : ' WS-DIFF-CNT ' 件'
            ELSE
-               DISPLAY '  現金実査  : 未実施 (突合していません)'
+               DISPLAY '  現金実査  : 未実施'
            END-IF
            IF WS-OVERFLOW = 'Y'
                DISPLAY '*** 検出件数が上限に達し、明細を打ち切りました。'

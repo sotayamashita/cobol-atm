@@ -19,10 +19,18 @@
                ORGANIZATION IS LINE SEQUENTIAL
                FILE STATUS IS WS-JRNL-STATUS.
 
+      *    -- 退避先。営業日ごとに 1 本作るのでファイル名は実行時に決まる
+           SELECT ARC-FILE ASSIGN USING WS-ARC-NAME
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-ARC-STATUS.
+
        DATA DIVISION.
        FILE SECTION.
        FD  JRNL-FILE.
        COPY 'JRNLREC.cpy'.
+
+       FD  ARC-FILE.
+       01  ARC-RECORD                  PIC X(200).
 
        WORKING-STORAGE SECTION.
        01  WS-JRNL-STATUS              PIC X(02) VALUE '00'.
@@ -33,6 +41,12 @@
       *    -- どちらのモードで開いているか判別できなくなる。
        01  WS-SCANNING                 PIC X(01) VALUE 'N'.
        01  WS-IDX                      PIC 9(02) VALUE ZERO.
+       01  WS-ARC-STATUS               PIC X(02) VALUE '00'.
+       01  WS-ARC-NAME                 PIC X(64) VALUE SPACES.
+       01  WS-ARC-DATE                 PIC 9(08) VALUE ZERO.
+       01  WS-ARC-CNT                  PIC 9(09) VALUE ZERO.
+       01  WS-ARC-EXISTS               PIC X(01) VALUE 'N'.
+       COPY 'CLSIF.cpy'.
        COPY 'ATMCONST.cpy'.
        COPY 'RETCODE.cpy'.
 
@@ -52,6 +66,7 @@
                WHEN JRNL-FN-SCAN-OPEN   PERFORM SCAN-OPEN-JOURNAL
                WHEN JRNL-FN-SCAN-NEXT   PERFORM SCAN-NEXT-JOURNAL
                WHEN JRNL-FN-SCAN-CLOSE  PERFORM SCAN-CLOSE-JOURNAL
+               WHEN JRNL-FN-ARCHIVE     PERFORM ARCHIVE-JOURNAL
                WHEN OTHER           MOVE RC-FATAL TO JRNL-OUT-RETCODE
            END-EVALUATE
            GOBACK.
@@ -87,6 +102,10 @@
                END-PERFORM
                CLOSE JRNL-FILE
            END-IF
+
+      *    -- 退避直後は EJ が空で、走査では通番を復元できない。
+      *    -- 控えてある最終通番と大きいほうを起点にする。
+           PERFORM RESTORE-SEQ-FROM-STATE
 
            OPEN EXTEND JRNL-FILE
       *    -- 初回起動時は EJ が存在しないため新規作成する
@@ -142,6 +161,134 @@
                MOVE RC-IO-ERROR TO JRNL-OUT-RETCODE
            END-IF.
        WRITE-J-EXIT.
+           EXIT.
+
+       RESTORE-SEQ-FROM-STATE SECTION.
+       RSS-START.
+           SET CLS-FN-GET-JSEQ TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION
+           IF CLS-IO-JRNL-SEQ > WS-SEQ
+               MOVE CLS-IO-JRNL-SEQ TO WS-SEQ
+           END-IF.
+       RSS-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * ARCHIVE : 当日分を日付つきのファイルへ写し、現用の EJ を空にする。
+      *
+      *   順序が重要で、写し終えるまで現用ファイルには触らない。
+      *   途中で落ちても EJ が残っていれば、やり直せば同じ結果になる。
+      *
+      *   退避先が既にある場合は書き直さない。前回が「写した直後・
+      *   空にする前」に落ちた場合は中身が同じなので害はないが、
+      *   「空にした直後」に落ちた場合に書き直すと、空の EJ で
+      *   退避済みファイルを上書きして当日分を失う。
+      *
+      *   退避済みファイルは消さない。保存年限は監査要件であり、
+      *   削除は運用側が決めること。
+      *----------------------------------------------------------------
+       ARCHIVE-JOURNAL SECTION.
+       ARC-START.
+           MOVE ZERO TO JRNL-OUT-ARCHIVED-CNT
+           MOVE ZERO TO WS-ARC-CNT
+           MOVE JRNL-IN-ARCHIVE-DATE TO WS-ARC-DATE
+           PERFORM BUILD-ARCHIVE-NAME
+
+      *    -- 追記用に開いたままだと写しの途中で伸びうるので閉じる
+           PERFORM CLOSE-JOURNAL
+
+           PERFORM CHECK-ARCHIVE-EXISTS
+           IF WS-ARC-EXISTS NOT = 'Y'
+               PERFORM COPY-TO-ARCHIVE
+               IF JRNL-OUT-RETCODE NOT = RC-OK
+                   GO TO ARC-EXIT
+               END-IF
+           END-IF
+
+           PERFORM SAVE-SEQ-TO-STATE
+           PERFORM TRUNCATE-JOURNAL
+           MOVE WS-ARC-CNT TO JRNL-OUT-ARCHIVED-CNT.
+       ARC-EXIT.
+           EXIT.
+
+       BUILD-ARCHIVE-NAME SECTION.
+       BAN-START.
+           MOVE SPACES TO WS-ARC-NAME
+           STRING 'data/atmjrnl-' DELIMITED BY SIZE
+                  WS-ARC-DATE     DELIMITED BY SIZE
+                  '.dat'          DELIMITED BY SIZE
+               INTO WS-ARC-NAME
+           END-STRING.
+       BAN-EXIT.
+           EXIT.
+
+       CHECK-ARCHIVE-EXISTS SECTION.
+       CAE-START.
+           MOVE 'N' TO WS-ARC-EXISTS
+           OPEN INPUT ARC-FILE
+           IF WS-ARC-STATUS = '00' OR WS-ARC-STATUS = '05'
+               MOVE 'Y' TO WS-ARC-EXISTS
+               CLOSE ARC-FILE
+           END-IF.
+       CAE-EXIT.
+           EXIT.
+
+       COPY-TO-ARCHIVE SECTION.
+       CTA-START.
+           OPEN INPUT JRNL-FILE
+      *    -- EJ が無い日は退避するものが無い。障害ではない。
+           IF WS-JRNL-STATUS = '35'
+               GO TO CTA-EXIT
+           END-IF
+           IF WS-JRNL-STATUS NOT = '00' AND WS-JRNL-STATUS NOT = '05'
+               MOVE RC-IO-ERROR TO JRNL-OUT-RETCODE
+               GO TO CTA-EXIT
+           END-IF
+
+           OPEN OUTPUT ARC-FILE
+           IF WS-ARC-STATUS NOT = '00'
+               MOVE RC-IO-ERROR TO JRNL-OUT-RETCODE
+               CLOSE JRNL-FILE
+               GO TO CTA-EXIT
+           END-IF
+
+           PERFORM UNTIL WS-JRNL-STATUS NOT = '00'
+               READ JRNL-FILE
+                   AT END
+                       EXIT PERFORM
+                   NOT AT END
+                       MOVE JRNL-RECORD TO ARC-RECORD
+                       WRITE ARC-RECORD
+                       ADD 1 TO WS-ARC-CNT
+                       IF JRNL-SEQ > WS-SEQ
+                           MOVE JRNL-SEQ TO WS-SEQ
+                       END-IF
+               END-READ
+           END-PERFORM
+
+           CLOSE ARC-FILE
+           CLOSE JRNL-FILE.
+       CTA-EXIT.
+           EXIT.
+
+       SAVE-SEQ-TO-STATE SECTION.
+       SSS-START.
+           MOVE WS-SEQ TO CLS-IO-JRNL-SEQ
+           SET CLS-FN-PUT-JSEQ TO TRUE
+           CALL 'ATMCLS' USING CLS-PARM ATM-SESSION.
+       SSS-EXIT.
+           EXIT.
+
+      *    -- 現用 EJ を空にする。次の営業日は 0 件から始まる。
+       TRUNCATE-JOURNAL SECTION.
+       TRN-START.
+           OPEN OUTPUT JRNL-FILE
+           IF WS-JRNL-STATUS = '00'
+               CLOSE JRNL-FILE
+           ELSE
+               MOVE RC-IO-ERROR TO JRNL-OUT-RETCODE
+           END-IF.
+       TRN-EXIT.
            EXIT.
 
        CLOSE-JOURNAL SECTION.

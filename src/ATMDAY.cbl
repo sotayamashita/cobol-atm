@@ -526,8 +526,35 @@
            END-IF
 
            SET CASH-FN-CLOSE TO TRUE
-           CALL 'ATMCASH' USING CASH-PARM ATM-SESSION.
+           CALL 'ATMCASH' USING CASH-PARM ATM-SESSION
+
+           PERFORM ARCHIVE-JOURNAL.
        CF-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * EJ の退避。当日分を日付つきのファイルへ写し、現用の EJ を
+      * 空にする。追記専用のまま伸ばし続けると、起動時の通番復元と
+      * 締めの走査が運用日数に比例して重くなる。
+      *
+      * 帳票を書き終えてから行う。写しに失敗しても当日の締め結果は
+      * 残り、EJ も現用のまま手つかずで残るので、原因を解いてから
+      * やり直せる。
+      *----------------------------------------------------------------
+       ARCHIVE-JOURNAL SECTION.
+       AJ-START.
+           MOVE SESS-BUSINESS-DATE TO JRNL-IN-ARCHIVE-DATE
+           SET JRNL-FN-ARCHIVE TO TRUE
+           CALL 'ATMJRNL' USING JRNL-PARM ATM-SESSION
+
+           IF JRNL-OUT-RETCODE = RC-OK
+               DISPLAY '  EJ 退避  : ' JRNL-OUT-ARCHIVED-CNT ' 件'
+           ELSE
+               DISPLAY '*** EJ を退避できませんでした。'
+                       ' 現用の EJ はそのまま残しています。'
+               MOVE 'Y' TO WS-ACTION
+           END-IF.
+       AJ-EXIT.
            EXIT.
 
        FINISH-NORMAL SECTION.

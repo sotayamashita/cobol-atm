@@ -31,8 +31,13 @@
                88  CLS-FN-RELEASE              VALUE 'RELEASE '.
       *        -- 端末内で一意な連番を 1 つ払い出す
                88  CLS-FN-NEXT-NO              VALUE 'NEXTNO  '.
+      *        -- EJ の最終通番の読み書き。EJ を退避して空にすると
+      *        -- 走査で復元できなくなるため、ここに控える。
+               88  CLS-FN-GET-JSEQ             VALUE 'JSEQGET '.
+               88  CLS-FN-PUT-JSEQ             VALUE 'JSEQPUT '.
                88  CLS-FN-CLOSE                VALUE 'CLOSE   '.
            05  CLS-IN-DIFF-CNT         PIC 9(05).
+           05  CLS-IO-JRNL-SEQ         PIC 9(09).
            05  CLS-IN-PENDING-CNT      PIC 9(05).
            05  CLS-OUT-RETCODE         PIC S9(04) COMP.
            05  CLS-OUT-ERROR-CODE      PIC X(04).

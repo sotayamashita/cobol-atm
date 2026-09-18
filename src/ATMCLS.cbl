@@ -56,6 +56,8 @@
                WHEN CLS-FN-FINISH   PERFORM FINISH-CLOSING
                WHEN CLS-FN-RELEASE  PERFORM RELEASE-FLAG
                WHEN CLS-FN-NEXT-NO  PERFORM ISSUE-NEXT-NO
+               WHEN CLS-FN-GET-JSEQ PERFORM GET-JOURNAL-SEQ
+               WHEN CLS-FN-PUT-JSEQ PERFORM PUT-JOURNAL-SEQ
                WHEN CLS-FN-CLOSE    PERFORM CLOSE-STATE-FILE
                WHEN OTHER
                    MOVE RC-FATAL TO CLS-OUT-RETCODE
@@ -173,6 +175,42 @@
            REWRITE CLOSE-RECORD
            END-REWRITE.
        INN-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * EJ の最終通番。EJ を退避して空にすると、既存レコードの走査で
+      * 通番を復元できなくなる。退避のたびにここへ控え、起動時に
+      * EJ が空だった場合の起点として使う。
+      *
+      * 通番が日をまたいで続かないと、退避済みファイルと現用ファイルで
+      * 同じ番号のレコードができ、監査で取引を一意に辿れなくなる。
+      *----------------------------------------------------------------
+       GET-JOURNAL-SEQ SECTION.
+       GJS-START.
+           PERFORM READ-STATE
+           IF CLS-OUT-RETCODE = RC-OK
+               MOVE CLS-LAST-JRNL-SEQ TO CLS-IO-JRNL-SEQ
+           ELSE
+      *        -- 状態が読めない場合はゼロ起点にする。EJ 側は走査で
+      *        -- 復元できた値と大きいほうを採るので、既存レコードが
+      *        -- あれば通番は失われない。
+               MOVE ZERO TO CLS-IO-JRNL-SEQ
+               MOVE RC-OK TO CLS-OUT-RETCODE
+           END-IF.
+       GJS-EXIT.
+           EXIT.
+
+       PUT-JOURNAL-SEQ SECTION.
+       PJS-START.
+           PERFORM READ-STATE
+           IF CLS-OUT-RETCODE NOT = RC-OK
+               GO TO PJS-EXIT
+           END-IF
+           MOVE CLS-IO-JRNL-SEQ    TO CLS-LAST-JRNL-SEQ
+           MOVE SESS-BUSINESS-DATE TO CLS-LAST-ARCHIVED-DATE
+           REWRITE CLOSE-RECORD
+           END-REWRITE.
+       PJS-EXIT.
            EXIT.
 
        CLOSE-STATE-FILE SECTION.

@@ -154,7 +154,7 @@
        INITIALIZE-BATCH SECTION.
        INIT-START.
            INITIALIZE ATM-SESSION
-           MOVE CN-ATM-ID TO SESS-ATM-ID
+           CALL 'ATMENV' USING SESS-ATM-ID
            MOVE FUNCTION CURRENT-DATE TO WS-CURRENT-DATE
            MOVE WS-CD-YYYYMMDD TO SESS-BUSINESS-DATE
            COMPUTE SESS-TIMESTAMP =
@@ -163,7 +163,7 @@
            PERFORM INIT-SUMMARY
 
            DISPLAY ' '
-           DISPLAY '=== 日次締め 端末 ' CN-ATM-ID
+           DISPLAY '=== 日次締め 端末 ' SESS-ATM-ID
                    ' 営業日 ' SESS-BUSINESS-DATE ' ==='
 
            SET CLS-FN-CHECK TO TRUE

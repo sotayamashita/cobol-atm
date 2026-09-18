@@ -25,7 +25,7 @@
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
-           SELECT RPT-FILE ASSIGN TO 'data/atmrpt.txt'
+           SELECT RPT-FILE ASSIGN USING WS-RPT-NAME
                ORGANIZATION IS LINE SEQUENTIAL
                FILE STATUS IS WS-RPT-STATUS.
 
@@ -36,6 +36,8 @@
 
        WORKING-STORAGE SECTION.
        01  WS-RPT-STATUS               PIC X(02) VALUE '00'.
+      *    -- 帳票は端末ごと。ファイル名に端末 ID を含める。
+       01  WS-RPT-NAME                 PIC X(64) VALUE SPACES.
        01  WS-OPENED                   PIC X(01) VALUE 'N'.
        01  WS-LINE                     PIC X(256) VALUE SPACES.
        01  WS-RULE                     PIC X(96)  VALUE ALL '-'.
@@ -98,6 +100,13 @@
            IF WS-OPENED = 'Y'
                GO TO OPEN-R-EXIT
            END-IF
+
+           MOVE SPACES TO WS-RPT-NAME
+           STRING 'data/atmrpt-' DELIMITED BY SIZE
+                  SESS-ATM-ID    DELIMITED BY SIZE
+                  '.txt'         DELIMITED BY SIZE
+               INTO WS-RPT-NAME
+           END-STRING
 
            OPEN OUTPUT RPT-FILE
            IF WS-RPT-STATUS NOT = '00' AND WS-RPT-STATUS NOT = '05'

@@ -96,14 +96,14 @@
       *    -- 英数字項目にバイナリゼロが残り、行順編成の EJ への
       *    -- 書込みが不正文字として拒否される。
            INITIALIZE ATM-SESSION
-           MOVE CN-ATM-ID TO SESS-ATM-ID
+           CALL 'ATMENV' USING SESS-ATM-ID
            MOVE FUNCTION CURRENT-DATE TO WS-CURRENT-DATE
            MOVE WS-CD-YYYYMMDD TO SESS-BUSINESS-DATE
            COMPUTE SESS-TIMESTAMP =
                WS-CD-YYYYMMDD * 1000000 + WS-CD-HHMMSS
 
            DISPLAY ' '
-           DISPLAY '=== カセット装填 端末 ' CN-ATM-ID
+           DISPLAY '=== カセット装填 端末 ' SESS-ATM-ID
                    ' 営業日 ' SESS-BUSINESS-DATE ' ==='
 
            SET JRNL-FN-OPEN TO TRUE

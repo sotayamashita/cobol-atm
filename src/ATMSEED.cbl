@@ -23,7 +23,7 @@
                ACCESS MODE IS RANDOM
                RECORD KEY IS CARD-PAN
                FILE STATUS IS WS-STATUS.
-           SELECT CASH-FILE ASSIGN TO 'data/atmcash.dat'
+           SELECT CASH-FILE ASSIGN USING WS-CASH-NAME
                ORGANIZATION IS INDEXED
                ACCESS MODE IS RANDOM
                RECORD KEY IS CASH-ATM-ID
@@ -45,7 +45,7 @@
            SELECT HOUR-FILE ASSIGN TO 'data/atmhour.dat'
                ORGANIZATION IS LINE SEQUENTIAL
                FILE STATUS IS WS-STATUS.
-           SELECT CLOSE-FILE ASSIGN TO 'data/atmclose.dat'
+           SELECT CLOSE-FILE ASSIGN USING WS-CLOSE-NAME
                ORGANIZATION IS INDEXED
                ACCESS MODE IS RANDOM
                RECORD KEY IS CLS-ATM-ID
@@ -76,6 +76,10 @@
 
        WORKING-STORAGE SECTION.
        01  WS-STATUS                   PIC X(02) VALUE '00'.
+      *    -- 端末ごとのファイル。端末 ID は ATMENV が解決する。
+       01  WS-ATM-ID                   PIC X(08) VALUE SPACES.
+       01  WS-CASH-NAME                PIC X(64) VALUE SPACES.
+       01  WS-CLOSE-NAME               PIC X(64) VALUE SPACES.
        01  WS-PIN-NUM                  PIC 9(04) VALUE ZERO.
 
        COPY 'ATMCONST.cpy'.
@@ -86,6 +90,20 @@
 
        MAIN-CONTROL SECTION.
        MAIN-START.
+           CALL 'ATMENV' USING WS-ATM-ID
+           MOVE SPACES TO WS-CASH-NAME
+           STRING 'data/atmcash-' DELIMITED BY SIZE
+                  WS-ATM-ID       DELIMITED BY SIZE
+                  '.dat'          DELIMITED BY SIZE
+               INTO WS-CASH-NAME
+           END-STRING
+           MOVE SPACES TO WS-CLOSE-NAME
+           STRING 'data/atmclose-' DELIMITED BY SIZE
+                  WS-ATM-ID        DELIMITED BY SIZE
+                  '.dat'           DELIMITED BY SIZE
+               INTO WS-CLOSE-NAME
+           END-STRING
+
            OPEN OUTPUT ACCT-FILE CARD-FILE CASH-FILE
                        BANK-FILE FEE-FILE LIMIT-FILE HOL-FILE
                        HOUR-FILE CLOSE-FILE
@@ -546,7 +564,7 @@
        SEED-CLOSE-STATE SECTION.
        SCS-START.
            MOVE SPACES TO CLOSE-RECORD
-           MOVE CN-ATM-ID TO CLS-ATM-ID
+           MOVE WS-ATM-ID TO CLS-ATM-ID
            MOVE 20260916  TO CLS-LAST-CLOSED-DATE
            MOVE 20260916180000 TO CLS-LAST-CLOSED-TS
            SET  CLS-ST-IDLE TO TRUE
@@ -606,7 +624,7 @@
        SEED-CASSETTE SECTION.
        SD-START.
            MOVE SPACES TO CASH-RECORD
-           MOVE CN-ATM-ID TO CASH-ATM-ID
+           MOVE WS-ATM-ID TO CASH-ATM-ID
            MOVE 20260917   TO CASH-BUSINESS-DATE
 
            MOVE 10000 TO CASH-DENOM(1)

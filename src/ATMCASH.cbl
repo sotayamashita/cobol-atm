@@ -21,7 +21,7 @@
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
-           SELECT CASH-FILE ASSIGN TO 'data/atmcash.dat'
+           SELECT CASH-FILE ASSIGN USING WS-CASH-NAME
                ORGANIZATION IS INDEXED
                ACCESS MODE IS DYNAMIC
                RECORD KEY IS CASH-ATM-ID
@@ -34,6 +34,8 @@
 
        WORKING-STORAGE SECTION.
        01  WS-CASH-STATUS              PIC X(02) VALUE '00'.
+      *    -- 現金カセットは端末ごと。ファイル名に端末 ID を含める。
+       01  WS-CASH-NAME                PIC X(64) VALUE SPACES.
        01  WS-OPENED                   PIC X(01) VALUE 'N'.
 
        COPY 'ATMCONST.cpy'.
@@ -96,6 +98,13 @@
            IF WS-OPENED = 'Y'
                GO TO OPEN-C-EXIT
            END-IF
+           MOVE SPACES TO WS-CASH-NAME
+           STRING 'data/atmcash-' DELIMITED BY SIZE
+                  SESS-ATM-ID     DELIMITED BY SIZE
+                  '.dat'          DELIMITED BY SIZE
+               INTO WS-CASH-NAME
+           END-STRING
+
            OPEN I-O CASH-FILE
            IF WS-CASH-STATUS = '00'
                MOVE 'Y' TO WS-OPENED

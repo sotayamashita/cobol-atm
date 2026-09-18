@@ -17,7 +17,7 @@
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
-           SELECT JRNL-FILE ASSIGN TO 'data/atmjrnl.dat'
+           SELECT JRNL-FILE ASSIGN USING WS-JRNL-NAME
                ORGANIZATION IS LINE SEQUENTIAL
                FILE STATUS IS WS-JRNL-STATUS.
 
@@ -36,6 +36,8 @@
 
        WORKING-STORAGE SECTION.
        01  WS-JRNL-STATUS              PIC X(02) VALUE '00'.
+      *    -- EJ は端末ごと。ファイル名に端末 ID を含める。
+       01  WS-JRNL-NAME                PIC X(64) VALUE SPACES.
        01  WS-SEQ                      PIC 9(09) VALUE ZERO.
        01  WS-OPENED                   PIC X(01) VALUE 'N'.
       *    -- 走査用の状態。追記用 (WS-OPENED) とは別に持つ。同じ FD を
@@ -70,6 +72,14 @@
        MAIN-CONTROL SECTION.
        MAIN-START.
            MOVE RC-OK TO JRNL-OUT-RETCODE
+      *    -- EJ は端末ごと。どの機能から入ってもファイル名が要るので、
+      *    -- ここで一度だけ組み立てる。
+           MOVE SPACES TO WS-JRNL-NAME
+           STRING 'data/atmjrnl-' DELIMITED BY SIZE
+                  SESS-ATM-ID     DELIMITED BY SIZE
+                  '.dat'          DELIMITED BY SIZE
+               INTO WS-JRNL-NAME
+           END-STRING
            EVALUATE TRUE
                WHEN JRNL-FN-OPEN    PERFORM OPEN-JOURNAL
                WHEN JRNL-FN-WRITE   PERFORM WRITE-JOURNAL
@@ -314,6 +324,8 @@
        BAN-START.
            MOVE SPACES TO WS-ARC-NAME
            STRING 'data/atmjrnl-' DELIMITED BY SIZE
+                  SESS-ATM-ID     DELIMITED BY SIZE
+                  '-'             DELIMITED BY SIZE
                   WS-ARC-DATE     DELIMITED BY SIZE
                   '.dat'          DELIMITED BY SIZE
                INTO WS-ARC-NAME

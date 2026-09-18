@@ -21,7 +21,7 @@
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
-           SELECT CLOSE-FILE ASSIGN TO 'data/atmclose.dat'
+           SELECT CLOSE-FILE ASSIGN USING WS-CLOSE-NAME
                ORGANIZATION IS INDEXED
                ACCESS MODE IS RANDOM
                RECORD KEY IS CLS-ATM-ID
@@ -33,6 +33,8 @@
        COPY 'CLOSEREC.cpy'.
 
        WORKING-STORAGE SECTION.
+      *    -- 締め状態は端末ごと。ファイル名に端末 ID を含める。
+       01  WS-CLOSE-NAME               PIC X(64) VALUE SPACES.
        01  WS-CLOSE-STATUS             PIC X(02) VALUE '00'.
        01  WS-OPENED                   PIC X(01) VALUE 'N'.
 
@@ -69,6 +71,13 @@
            IF WS-OPENED = 'Y'
                GO TO OSF-EXIT
            END-IF
+           MOVE SPACES TO WS-CLOSE-NAME
+           STRING 'data/atmclose-' DELIMITED BY SIZE
+                  SESS-ATM-ID      DELIMITED BY SIZE
+                  '.dat'           DELIMITED BY SIZE
+               INTO WS-CLOSE-NAME
+           END-STRING
+
            OPEN I-O CLOSE-FILE
            IF WS-CLOSE-STATUS = '00'
                MOVE 'Y' TO WS-OPENED
@@ -85,7 +94,7 @@
            IF CLS-OUT-RETCODE NOT = RC-OK
                GO TO RS-EXIT
            END-IF
-           MOVE CN-ATM-ID TO CLS-ATM-ID
+           MOVE SESS-ATM-ID TO CLS-ATM-ID
            READ CLOSE-FILE
                INVALID KEY
                    MOVE RC-NOTFOUND  TO CLS-OUT-RETCODE

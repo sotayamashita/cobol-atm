@@ -2,9 +2,9 @@
 # 回帰テスト。取引結果とエラーコードだけを抜き出して比較可能にする。
 set -e
 cd "$(dirname "$0")"
-rm -f data/atmacct.dat data/atmcard.dat data/atmcash.dat data/atmjrnl.dat \
-  data/atmbank.dat data/atmfee.dat data/atmlimit.dat data/atmhol.dat \
-  data/atmclose.dat data/atmrpt.txt data/atmjrnl-*.dat
+# 端末ごとのファイルは端末 ID で分かれる。既定の端末で試験する。
+ATM=ATM00001
+rm -f data/atm*.dat data/atmrpt-*.txt
 mkdir -p data
 ./bin/atmseed >/dev/null
 
@@ -34,7 +34,7 @@ echo "### 6. PIN 3 回誤り → カード閉塞"
 printf '4900123456780002\n1111\n2222\n3333\n\n' | ./bin/atm | filter
 
 echo "### 7. 電子ジャーナル (フェーズ/種別/結果/エラー)"
-cut -c56-58,159-163 data/atmjrnl.dat
+cut -c56-58,159-163 "data/atmjrnl-$ATM.dat"
 
 # --- ここから第 2 波で追加した機能の検証 -------------------------------
 # 曜日区分・手数料・全銀経路は日付と時刻に依存するため、本体を通さず
@@ -56,13 +56,13 @@ close_filter() {
 # 締めは実査枚数を対話で受け取る。空入力 4 回で未計数 (未実施) になる。
 close_uncounted() { printf '\n\n\n\n' | ./bin/atmday; }
 
-jrnl_rows() { wc -l <data/atmjrnl.dat | tr -d ' '; }
-arc_rows() { cat data/atmjrnl-*.dat 2>/dev/null | wc -l | tr -d ' '; }
+jrnl_rows() { wc -l <"data/atmjrnl-$ATM.dat" | tr -d ' '; }
+arc_rows() { cat "data/atmjrnl-$ATM-"*.dat 2>/dev/null | wc -l | tr -d ' '; }
 
 # 締め状態の営業日を前日へ戻す。係員が締め直す状況の再現。
 reopen_close_state() {
   python3 -c "
-p='data/atmclose.dat'
+p='data/atmclose-$ATM.dat'
 d=open(p,'rb').read()
 open(p,'wb').write(d.replace(b'20260918', b'20260917', 1))
 "
@@ -76,7 +76,7 @@ echo "   退避先: $(arc_rows) 行"
 
 echo "-- 退避後も通番が続くか (退避済みの最終通番の次から始まる)"
 printf '4900123456780001\n4321\n1\n9\n\n' | ./bin/atm >/dev/null 2>&1
-echo "   新規レコードの通番: $(cut -c1-9 data/atmjrnl.dat | head -1)"
+echo "   新規レコードの通番: $(cut -c1-9 "data/atmjrnl-$ATM.dat" | head -1)"
 
 echo "-- 同じ営業日に再実行 (二重実行の防止)"
 close_uncounted | close_filter
@@ -89,23 +89,23 @@ echo "   退避先: $(arc_rows) 行 (増えも減りもしない)"
 echo "-- 取引の終了レコードを落として再締め (不確定取引の検出)"
 printf '4900123456780001\n4321\n2\n5000\n9\n\n' | ./bin/atm >/dev/null 2>&1
 python3 -c "
-p='data/atmjrnl.dat'
+p='data/atmjrnl-$ATM.dat'
 lines=open(p,encoding='utf-8').read().splitlines()
 out=[x for x in lines if not (len(x)>57 and x[55]=='E' and x[56:58]=='WD')]
 open(p,'w',encoding='utf-8').write(chr(10).join(out)+chr(10))
 "
 reopen_close_state
 close_uncounted | close_filter
-grep -oE '\[(PN|ZU|CD|RF)\] [^ ]+' data/atmrpt.txt || true
+grep -oE '\[(PN|ZU|CD|RF)\] [^ ]+' "data/atmrpt-$ATM.txt" || true
 
 echo "-- 現金実査を入力すると突合が有効になる"
 # 帳簿と違う枚数を入れて差異 (CD) を出す。1 本でも未計数なら未実施。
 reopen_close_state
 printf '1\n' | ./bin/atmday | close_filter
-grep -oE '\[(PN|ZU|CD|RF|NC)\] [^ ]+' data/atmrpt.txt || true
+grep -oE '\[(PN|ZU|CD|RF|NC)\] [^ ]+' "data/atmrpt-$ATM.txt" || true
 reopen_close_state
 printf '1\n2\n3\n4\n' | ./bin/atmday | close_filter
-grep -oE '\[(PN|ZU|CD|RF|NC)\] [^ ]+' data/atmrpt.txt || true
+grep -oE '\[(PN|ZU|CD|RF|NC)\] [^ ]+' "data/atmrpt-$ATM.txt" || true
 
 echo "### 9c. カセット装填"
 # 装填は枚数の置換。加算ではないので、装填後の枚数をそのまま入れる。
@@ -115,7 +115,7 @@ load_filter() {
 
 echo "-- 帳簿枚数とカセットの状態を示す (障害中のカセットを含む)"
 python3 -c "
-p='data/atmcash.dat'
+p='data/atmcash-$ATM.dat'
 d=bytearray(open(p,'rb').read()); i=d.index(b'ATM00001'); d[i+66:i+67]=b'F'
 open(p,'wb').write(d)
 "
@@ -132,13 +132,13 @@ echo "-- 負数・非数値・範囲外は弾く"
 printf -- '-5\nabc\n999999\n\n' | ./bin/atmload | load_filter
 
 echo "-- EJ に装填が残るか (LD)"
-grep -c 'LD' data/atmjrnl.dat
+grep -c 'LD' "data/atmjrnl-$ATM.dat"
 
 echo "### 9d. 障害カセットへの入金は受け付けない"
 # カセット 3 (2 千券) の状態を F にする。実際に障害を起こす手段が
 # 無いので、在庫ファイルを直接書き換えて再現する。
 python3 -c "
-p='data/atmcash.dat'
+p='data/atmcash-$ATM.dat'
 d=bytearray(open(p,'rb').read())
 i=d.index(b'ATM00001')
 d[i+66:i+67]=b'F'
@@ -150,7 +150,9 @@ printf '4900123456780001\n4321\n3\n0\n0\n1\n0\n9\n\n' | ./bin/atm | filter
 
 echo "### 9e. 退避 EJ の保存年限管理"
 # 退避ファイルを人工的に用意する。古い 3 本と、保存年限内の 1 本。
-for d in 20200101 20200102 20240301 20260917; do echo dummy >"data/atmjrnl-$d.dat"; done
+for d in 20200101 20200102 20240301 20260917; do
+  echo dummy >"data/atmjrnl-$ATM-$d.dat"
+done
 purge_filter() { grep -E '対象|削除|中止|日数|保存年限が' || true; }
 
 echo "-- 保存年限を指定しなければ何もしない"
@@ -158,16 +160,16 @@ printf '\n' | ./bin/atmpurge | purge_filter
 
 echo "-- 確認で Y 以外なら消さない"
 printf '365\nN\n' | ./bin/atmpurge | purge_filter
-find data -name 'atmjrnl-2*.dat' | wc -l | tr -d ' '
+find data -name "atmjrnl-$ATM-2*.dat" | wc -l | tr -d ' '
 
 echo "-- 確認で Y なら消す (保存年限内の 1 本は残る)"
 printf '365\nY\n' | ./bin/atmpurge | purge_filter
-find data -name 'atmjrnl-2*.dat' | sort
+find data -name "atmjrnl-$ATM-2*.dat" | sort
 
 echo "-- 範囲外・非数値は弾く"
 printf -- '-1\n' | ./bin/atmpurge | purge_filter
 printf 'abc\n' | ./bin/atmpurge | purge_filter
-rm -f data/atmjrnl-2*.dat
+rm -f data/atmjrnl-$ATM-2*.dat
 
 echo "### 10. 手数料マスタ (曜日区分 × 時間帯 × カード区分)"
 sort data/atmfee.dat
@@ -185,3 +187,35 @@ printf '4900123456780009\n1234\n1\n9\n\n' | ./bin/atm | grep '現在残高'
 echo "### 12. 営業時間マスタ (曜日区分 × 時間帯)"
 # 既定は 24 時間稼働。行を消すと規制なし、終日休止は 0000-0000 で表す。
 cut -c1-9 data/atmhour.dat
+
+echo "### 13. 複数端末 (端末 ID は環境変数 ATM_ID で与える)"
+# 口座元帳はホストが持つので全端末で共有する。現金・EJ・締め状態は
+# 端末ごとに分かれる。2 台から同じ口座を引き出して両方が記帳されること、
+# それぞれの現金と EJ が混ざらないことを見る。
+rm -f data/atm*.dat data/atmrpt-*.txt
+./bin/atmseed >/dev/null                 # 既定の端末 (ATM00001)
+ATM_ID=ATM00002 ./bin/atmseed >/dev/null # 2 台目のカセットと締め状態
+
+echo "-- ATM00001 から 10,000 円、ATM00002 から 20,000 円引き出す"
+printf '4900123456780001\n1234\n2\n10000\n9\n\n' | ./bin/atm | filter
+printf '4900123456780001\n1234\n2\n20000\n9\n\n' |
+  ATM_ID=ATM00002 ./bin/atm | filter
+
+echo "-- 元帳は共有 (350,000 - 30,000 = 320,000)"
+printf '4900123456780001\n1234\n1\n9\n\n' | ./bin/atm | grep '現在残高'
+
+echo "-- 端末ごとのファイルが分かれている"
+find data -name 'atmjrnl-ATM0000*.dat' -o -name 'atmcash-ATM0000*.dat' | sort
+
+echo "-- EJ は混ざらない (各端末の出金は 1 件ずつ)"
+for t in ATM00001 ATM00002; do
+  echo "   $t: $(cut -c56-58 "data/atmjrnl-$t.dat" | grep -c EWD) 件"
+done
+
+echo "-- 現金も別勘定 (1 万券の残枚数)"
+# 索引編成なのでレコードを切り出してから桁で拾う。
+notes_10k() { tr -d '\000' <"data/atmcash-$1.dat" | grep -o "$1[0-9OLEF+]*" |
+  head -1 | cut -c23-27; }
+for t in ATM00001 ATM00002; do
+  echo "   $t: $(notes_10k "$t") 枚"
+done

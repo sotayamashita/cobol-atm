@@ -92,7 +92,7 @@
       *    -- 英数字項目にバイナリゼロが残り、行順編成の EJ への
       *    -- 書込みが不正文字として拒否される (file status 71)。
            INITIALIZE ATM-SESSION
-           MOVE CN-ATM-ID TO SESS-ATM-ID
+           CALL 'ATMENV' USING SESS-ATM-ID
            PERFORM REFRESH-CLOCK
 
            SET JRNL-FN-OPEN TO TRUE
@@ -113,7 +113,7 @@
 
            DISPLAY ' '
            DISPLAY '================================================'
-           DISPLAY '   COBOL ATM  端末 ' CN-ATM-ID '  店番 '
+           DISPLAY '   COBOL ATM  端末 ' SESS-ATM-ID '  店番 '
                    CN-BRANCH-CD
            DISPLAY '================================================'.
        INIT-EXIT.

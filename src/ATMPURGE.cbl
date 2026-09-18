@@ -83,12 +83,12 @@
        INITIALIZE-BATCH SECTION.
        INIT-START.
            INITIALIZE ATM-SESSION
-           MOVE CN-ATM-ID TO SESS-ATM-ID
+           CALL 'ATMENV' USING SESS-ATM-ID
            MOVE FUNCTION CURRENT-DATE TO WS-CURRENT-DATE
            MOVE WS-CD-YYYYMMDD TO SESS-BUSINESS-DATE
 
            DISPLAY ' '
-           DISPLAY '=== 退避 EJ の保存年限管理 端末 ' CN-ATM-ID
+           DISPLAY '=== 退避 EJ の保存年限管理 端末 ' SESS-ATM-ID
                    ' 基準日 ' SESS-BUSINESS-DATE ' ==='.
        INIT-EXIT.
            EXIT.

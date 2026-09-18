@@ -55,10 +55,7 @@
            05  WS-PLAN-CNT             PIC S9(05) COMP OCCURS 4 TIMES.
            05  WS-REMAIN               PIC S9(13)V99 VALUE ZERO.
            05  WS-AMT-INT              PIC S9(13) VALUE ZERO.
-           05  WS-I                    PIC S9(04) COMP VALUE ZERO.
-           05  WS-MATCH                PIC S9(04) COMP VALUE ZERO.
            05  WS-DEP-SUM              PIC S9(13)V99 VALUE ZERO.
-           05  WS-ACC-CNT              PIC S9(05) COMP OCCURS 4 TIMES.
 
       *    -- DP 表。添字は c=1..5 (1 が c=0 に相当), u=1..1001 (1 が u=0)
        01  WS-DP-TABLE.
@@ -103,7 +100,18 @@
            ELSE
                MOVE RC-IO-ERROR  TO CASH-OUT-RETCODE
                MOVE EC-SYSTEM-IO TO CASH-OUT-ERROR-CODE
-           END-IF.
+               GO TO OPEN-C-EXIT
+           END-IF
+
+      *    -- 金種の並びは据付構成で取引ごとに変わらない。開局時に一度
+      *    -- 返しておけば、呼出元が取引のたびに在庫を読み直さずに済む。
+           PERFORM LOAD-CASSETTE
+           IF CASH-OUT-RETCODE NOT = RC-OK
+               GO TO OPEN-C-EXIT
+           END-IF
+           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
+               MOVE CASH-DENOM(WS-C) TO CASH-LO-DENOM(WS-C)
+           END-PERFORM.
        OPEN-C-EXIT.
            EXIT.
 
@@ -303,7 +311,9 @@
            END-IF
 
            PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
-               ADD WS-ACC-CNT(WS-C) TO CASH-NOTE-CNT(WS-C)
+               ADD CASH-DP-CNT(WS-C)   TO CASH-NOTE-CNT(WS-C)
+               MOVE CASH-DP-CNT(WS-C)   TO SESS-DEP-CNT(WS-C)
+               MOVE CASH-DENOM(WS-C)    TO SESS-DEP-DENOM(WS-C)
            END-PERFORM
 
            ADD CASH-IN-AMOUNT TO CASH-DEPOSITED-TODAY
@@ -313,28 +323,24 @@
            EXIT.
 
       *----------------------------------------------------------------
-      * 入金内訳の検証。カセットごとの加算枚数を WS-ACC-CNT に組み立て、
-      * 合計が記帳額と一致することまで確かめてから呼出元へ返す。
+      * 入金内訳の検証。内訳の添字はカセット番号と一致する約束なので
+      * (CASHIF.cpy)、金種が同じ位置で揃っているかを見れば足りる。
+      * 揃っていなければ呼出元が別の並びで渡しており、そのまま加算すると
+      * 在庫が壊れる。合計が記帳額と一致することまで確かめてから返す。
       *----------------------------------------------------------------
        VALIDATE-DEPOSIT-DETAIL SECTION.
        VDD-START.
            MOVE ZERO TO WS-DEP-SUM
            PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
-               MOVE ZERO TO WS-ACC-CNT(WS-C)
-           END-PERFORM
-
-           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > CN-CASSETTE-CNT
-               IF CASH-DP-CNT(WS-I) > ZERO
-                   PERFORM FIND-CASSETTE
-                   IF WS-MATCH = ZERO
+               IF CASH-DP-CNT(WS-C) > ZERO
+                   IF CASH-DP-DENOM(WS-C) NOT = CASH-DENOM(WS-C)
                        MOVE RC-BUSINESS-ERROR      TO CASH-OUT-RETCODE
                        MOVE EC-CASH-DEPOSIT-DETAIL TO
                             CASH-OUT-ERROR-CODE
                        GO TO VDD-EXIT
                    END-IF
-                   ADD CASH-DP-CNT(WS-I) TO WS-ACC-CNT(WS-MATCH)
                    COMPUTE WS-DEP-SUM = WS-DEP-SUM
-                       + CASH-DP-CNT(WS-I) * CASH-DP-DENOM(WS-I)
+                       + CASH-DP-CNT(WS-C) * CASH-DP-DENOM(WS-C)
                END-IF
            END-PERFORM
 
@@ -344,21 +350,6 @@
                MOVE EC-CASH-DEPOSIT-DETAIL TO CASH-OUT-ERROR-CODE
            END-IF.
        VDD-EXIT.
-           EXIT.
-
-      *----------------------------------------------------------------
-      * 内訳 WS-I 番目の金種を収めるカセットを探す。
-      * 見つからなければ WS-MATCH にゼロを返す。
-      *----------------------------------------------------------------
-       FIND-CASSETTE SECTION.
-       FC-START.
-           MOVE ZERO TO WS-MATCH
-           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
-               IF CASH-DENOM(WS-C) = CASH-DP-DENOM(WS-I)
-                   MOVE WS-C TO WS-MATCH
-               END-IF
-           END-PERFORM.
-       FC-EXIT.
            EXIT.
 
       *----------------------------------------------------------------

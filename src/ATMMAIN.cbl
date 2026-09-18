@@ -44,6 +44,13 @@
            05  WS-IN-ACCT              PIC X(10) VALUE SPACES.
            05  WS-IN-BANK              PIC X(04) VALUE SPACES.
            05  WS-NUM-AMOUNT           PIC 9(10) VALUE ZERO.
+      *    -- ACCEPT-NUMBER が受け取った値の置き場。呼出元が自分の
+      *    -- 項目へ写してから次の入力へ進む。
+           05  WS-NUM-INPUT            PIC 9(10) VALUE ZERO.
+
+      *    -- カセットの金種の並び。開局時に現金機構から一度受け取る。
+       01  WS-CASSETTE.
+           05  WS-CASSETTE-DENOM OCCURS 4 TIMES PIC 9(06).
 
        01  WS-DATETIME.
            05  WS-CURRENT-DATE.
@@ -95,6 +102,12 @@
            IF CASH-OUT-RETCODE NOT = RC-OK
                DISPLAY '*** 現金機構に接続できません。取扱を中止します'
                MOVE 'Y' TO WS-TERMINATE
+           ELSE
+      *        -- 金種の並びは据付構成なので開局時に一度だけ控える。
+               PERFORM VARYING WS-I FROM 1 BY 1
+                       UNTIL WS-I > CN-CASSETTE-CNT
+                   MOVE CASH-LO-DENOM(WS-I) TO WS-CASSETTE-DENOM(WS-I)
+               END-PERFORM
            END-IF
 
            DISPLAY ' '
@@ -539,15 +552,30 @@
        RDT-EXIT.
            EXIT.
 
+      *----------------------------------------------------------------
+      * 数値 1 項目の入力。金額も枚数もここを通す。入力の解釈を 1 箇所
+      * にまとめないと、全角数字や桁あふれの扱いを変えるたびに端末の
+      * 入力口ごとに挙動が食い違う。
+      *----------------------------------------------------------------
+       ACCEPT-NUMBER SECTION.
+       AN-START.
+           MOVE ZERO TO WS-NUM-INPUT
+      *    -- 入力前に必ず消す。入力が尽きた場合 ACCEPT は項目を
+      *    -- 変えないため、前の入力が残る。
+           MOVE SPACES TO WS-IN-AMOUNT
+           ACCEPT WS-IN-AMOUNT
+      *    -- TEST-NUMVAL は数値として解釈できれば 0 を返す
+           IF FUNCTION TEST-NUMVAL (WS-IN-AMOUNT) = ZERO
+               COMPUTE WS-NUM-INPUT = FUNCTION NUMVAL (WS-IN-AMOUNT)
+           END-IF.
+       AN-EXIT.
+           EXIT.
+
        ACCEPT-AMOUNT SECTION.
        AA-START.
            DISPLAY '金額を入力してください (円):'
-           ACCEPT WS-IN-AMOUNT
-           MOVE ZERO TO WS-NUM-AMOUNT
-      *    -- TEST-NUMVAL は数値として解釈できれば 0 を返す
-           IF FUNCTION TEST-NUMVAL (WS-IN-AMOUNT) = ZERO
-               COMPUTE WS-NUM-AMOUNT = FUNCTION NUMVAL (WS-IN-AMOUNT)
-           END-IF
+           PERFORM ACCEPT-NUMBER
+           MOVE WS-NUM-INPUT TO WS-NUM-AMOUNT
            IF WS-NUM-AMOUNT = ZERO
                DISPLAY '金額が正しくありません。'
            END-IF.
@@ -558,34 +586,18 @@
       * 入金は金額ではなく金種別の枚数を受け取る。金種別計数機が数えた
       * 結果を模擬するためで、投入金額を別に入力させると「入力額」と
       * 「数えた紙幣」が食い違い得る。枚数だけを真とし、金額はそこから
-      * 導く。カセットの金種構成は現金機構が持つので THEORY (照会のみ)
-      * で取得して提示する。
+      * 導く。内訳の添字はカセット番号と一致させる (CASHIF.cpy)。
       *----------------------------------------------------------------
        ACCEPT-DEPOSIT-NOTES SECTION.
        ADN-START.
            MOVE ZERO TO WS-NUM-AMOUNT
 
-           SET CASH-FN-THEORY TO TRUE
-           CALL 'ATMCASH' USING CASH-PARM ATM-SESSION
-           IF CASH-OUT-RETCODE NOT = RC-OK
-               MOVE CASH-OUT-ERROR-CODE TO SESS-ERROR-CODE
-               PERFORM SHOW-ERROR
-               GO TO ADN-EXIT
-           END-IF
-
            PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > CN-CASSETTE-CNT
-               MOVE CASH-TH-DENOM(WS-I) TO CASH-DP-DENOM(WS-I)
-               MOVE ZERO                TO CASH-DP-CNT(WS-I)
-               MOVE CASH-TH-DENOM(WS-I) TO WS-ED-DENOM
+               MOVE WS-CASSETTE-DENOM(WS-I) TO CASH-DP-DENOM(WS-I)
+               MOVE WS-CASSETTE-DENOM(WS-I) TO WS-ED-DENOM
                DISPLAY WS-ED-DENOM ' 円券の枚数:'
-      *        -- 入力前に必ず消す。入力が尽きた場合 ACCEPT は項目を
-      *        -- 変えないため、前の金種の枚数が残る。
-               MOVE SPACES TO WS-IN-AMOUNT
-               ACCEPT WS-IN-AMOUNT
-               IF FUNCTION TEST-NUMVAL (WS-IN-AMOUNT) = ZERO
-                   COMPUTE CASH-DP-CNT(WS-I) =
-                       FUNCTION NUMVAL (WS-IN-AMOUNT)
-               END-IF
+               PERFORM ACCEPT-NUMBER
+               MOVE WS-NUM-INPUT TO CASH-DP-CNT(WS-I)
                COMPUTE WS-NUM-AMOUNT = WS-NUM-AMOUNT
                    + CASH-DP-CNT(WS-I) * CASH-DP-DENOM(WS-I)
            END-PERFORM
@@ -653,15 +665,17 @@
 
       *----------------------------------------------------------------
       * 数えた紙幣を利用者へ示す。金額だけ出すと計数違いに気づけない。
+      * 表示元は払出と同じくセッション域。CALL パラメタ域は記帳を挟んだ
+      * 後も生きている保証が無い。
       *----------------------------------------------------------------
        SHOW-DEPOSIT-DETAIL SECTION.
        SDP-START.
            DISPLAY ' '
            DISPLAY '  お預かり金種:'
            PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > CN-CASSETTE-CNT
-               IF CASH-DP-CNT(WS-I) > ZERO
-                   MOVE CASH-DP-DENOM(WS-I) TO WS-ED-DENOM
-                   MOVE CASH-DP-CNT(WS-I)   TO WS-ED-NOTES
+               IF SESS-DEP-CNT(WS-I) > ZERO
+                   MOVE SESS-DEP-DENOM(WS-I) TO WS-ED-DENOM
+                   MOVE SESS-DEP-CNT(WS-I)   TO WS-ED-NOTES
                    DISPLAY '    ' WS-ED-DENOM ' 円券 x ' WS-ED-NOTES
                            ' 枚'
                END-IF

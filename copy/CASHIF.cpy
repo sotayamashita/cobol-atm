@@ -12,10 +12,9 @@
                88  CASH-FN-DISPENSE            VALUE 'DISPENSE'.
                88  CASH-FN-ACCEPT              VALUE 'ACCEPT  '.
                88  CASH-FN-CLOSE               VALUE 'CLOSE   '.
-      *        -- THEORY : 帳簿上あるべき枚数を返す (在庫は触らない)。
-      *        --          締めバッチの突合のほか、入金時にカセットの
-      *        --          金種構成を利用者へ提示するのにも使う。
-      *        -- SETTLE : 当日計をクリアして営業日を繰り越す (締め専用)
+      *        -- 締めバッチ用。
+      *        -- THEORY : 帳簿上あるべき枚数を返す (在庫は触らない)
+      *        -- SETTLE : 当日計をクリアして営業日を繰り越す
                88  CASH-FN-THEORY              VALUE 'THEORY  '.
                88  CASH-FN-SETTLE              VALUE 'SETTLE  '.
            05  CASH-IN-AMOUNT          PIC S9(13)V99 SIGN LEADING SEPARATE.
@@ -24,9 +23,17 @@
            05  CASH-OUT-PLAN.
                10  CASH-PL-DENOM OCCURS 4 TIMES PIC 9(06).
                10  CASH-PL-CNT   OCCURS 4 TIMES PIC 9(03).
+      *    -- OPEN が返す端末構成。カセットの金種の並びは据付構成で
+      *    -- 取引ごとに変わらないので、呼出元は起動時に一度受け取って
+      *    -- 保持すればよい。在庫を知るための THEORY とは用途が違う。
+           05  CASH-OUT-LAYOUT.
+               10  CASH-LO-DENOM OCCURS 4 TIMES PIC 9(06).
       *    -- ACCEPT へ渡す入金内訳。金種別計数機が数えた結果であり、
       *    -- 受入不可で返却した紙幣はここに含まれない。返却枚数を別に
       *    -- 持たないのは、収納したものだけを数えれば在庫は合うため。
+      *    -- 添字はカセット番号と一致させること (CASH-OUT-PLAN と同じ
+      *    -- 規約)。金種で引き当てる表にすると、同じ並びを二通りに
+      *    -- 表現することになる。CASH-LO-DENOM をそのまま写せばよい。
       *    -- 合計が CASH-IN-AMOUNT と一致しない内訳は受け付けない。
       *    -- 記帳額と収納額がずれると在庫と元帳が食い違うためである。
            05  CASH-IN-DEPOSIT.

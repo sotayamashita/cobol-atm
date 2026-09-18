@@ -65,3 +65,9 @@
            05  SESS-DISPENSE.
                10  SESS-DSP-DENOM OCCURS 4 TIMES PIC 9(06).
                10  SESS-DSP-CNT   OCCURS 4 TIMES PIC 9(03).
+      *    -- 収納金種 (ATMCASH が設定)。払出と同じく、確定した結果を
+      *    -- ここへ載せてから画面に出す。CALL パラメタ域は次の呼出で
+      *    -- 上書きされ得るので、取引の状態を置く場所にしない。
+           05  SESS-DEPOSIT.
+               10  SESS-DEP-DENOM OCCURS 4 TIMES PIC 9(06).
+               10  SESS-DEP-CNT   OCCURS 4 TIMES PIC 9(03).

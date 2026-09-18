@@ -93,6 +93,24 @@ reopen_close_state
 ./bin/atmday | close_filter
 grep -oE '\[(PN|ZU|CD|RF)\] [^ ]+' data/atmrpt.txt || true
 
+echo "### 9c. カセット装填"
+# 装填は枚数の置換。加算ではないので、装填後の枚数をそのまま入れる。
+load_filter() {
+  grep -E '円券 x|在庫増減|変更していません|範囲外|正しくありません|\[[0-9]{4}\]' || true
+}
+
+echo "-- 2 千券を 150 枚、千券を 500 枚に装填"
+printf '\n\n150\n500\n' | ./bin/atmload | load_filter
+
+echo "-- 全て空入力 (在庫も EJ も動かさない)"
+printf '\n\n\n\n' | ./bin/atmload | load_filter
+
+echo "-- 負数・非数値・範囲外は弾く"
+printf -- '-5\nabc\n999999\n\n' | ./bin/atmload | load_filter
+
+echo "-- EJ に装填が残るか (LD)"
+grep -c 'LD' data/atmjrnl.dat
+
 echo "### 10. 手数料マスタ (曜日区分 × 時間帯 × カード区分)"
 sort data/atmfee.dat
 

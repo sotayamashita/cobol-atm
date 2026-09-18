@@ -36,6 +36,7 @@ brew install gnu-cobol
 make seed   # マスタを初期化
 make run    # ATM を起動
 make close  # 日次締めバッチを流す (端末停止中に実行する)
+make load   # カセット装填バッチを流す (端末停止中に実行する)
 make test   # 回帰テスト
 ```
 

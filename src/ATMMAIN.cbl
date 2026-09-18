@@ -47,6 +47,7 @@
       *    -- ACCEPT-NUMBER が受け取った値の置き場。呼出元が自分の
       *    -- 項目へ写してから次の入力へ進む。
            05  WS-NUM-INPUT            PIC 9(10) VALUE ZERO.
+           05  WS-NUM-SIGNED           PIC S9(10) VALUE ZERO.
 
       *    -- カセットの金種の並び。開局時に現金機構から一度受け取る。
        01  WS-CASSETTE.
@@ -515,6 +516,8 @@
            PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > CN-CASSETTE-CNT
                MOVE ZERO TO SESS-DSP-CNT(WS-I)
                MOVE ZERO TO SESS-DSP-DENOM(WS-I)
+               MOVE ZERO TO SESS-DEP-CNT(WS-I)
+               MOVE ZERO TO SESS-DEP-DENOM(WS-I)
            END-PERFORM
 
       *    -- 曜日区分は営業日・時刻と同じく取引の属性なので、ここで
@@ -566,7 +569,12 @@
            ACCEPT WS-IN-AMOUNT
       *    -- TEST-NUMVAL は数値として解釈できれば 0 を返す
            IF FUNCTION TEST-NUMVAL (WS-IN-AMOUNT) = ZERO
-               COMPUTE WS-NUM-INPUT = FUNCTION NUMVAL (WS-IN-AMOUNT)
+               COMPUTE WS-NUM-SIGNED = FUNCTION NUMVAL (WS-IN-AMOUNT)
+      *        -- 符号付きで受けてから判定する。符号なし項目へ直接
+      *        -- 受けると、負数が絶対値に化けて素通りする。
+               IF WS-NUM-SIGNED > ZERO
+                   MOVE WS-NUM-SIGNED TO WS-NUM-INPUT
+               END-IF
            END-IF.
        AN-EXIT.
            EXIT.

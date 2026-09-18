@@ -12,11 +12,13 @@
                88  CASH-FN-DISPENSE            VALUE 'DISPENSE'.
                88  CASH-FN-ACCEPT              VALUE 'ACCEPT  '.
                88  CASH-FN-CLOSE               VALUE 'CLOSE   '.
-      *        -- 締めバッチ用。
+      *        -- 端末が停止している時間帯に流す運用バッチ用。
       *        -- THEORY : 帳簿上あるべき枚数を返す (在庫は触らない)
-      *        -- SETTLE : 当日計をクリアして営業日を繰り越す
+      *        -- SETTLE : 当日計をクリアして営業日を繰り越す (締め専用)
+      *        -- LOAD   : カセット装填 (装填バッチ専用)
                88  CASH-FN-THEORY              VALUE 'THEORY  '.
                88  CASH-FN-SETTLE              VALUE 'SETTLE  '.
+               88  CASH-FN-LOAD                VALUE 'LOAD    '.
            05  CASH-IN-AMOUNT          PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  CASH-OUT-RETCODE        PIC S9(04) COMP.
            05  CASH-OUT-ERROR-CODE     PIC X(04).
@@ -39,6 +41,19 @@
            05  CASH-IN-DEPOSIT.
                10  CASH-DP-DENOM OCCURS 4 TIMES PIC 9(06).
                10  CASH-DP-CNT   OCCURS 4 TIMES PIC 9(03).
+      *    -- LOAD へ渡す装填内容。添字はカセット番号 (入金内訳と同じ
+      *    -- 規約)。ACTION が 'R' のカセットだけを入れ替える。
+      *    -- 枚数ゼロでの装填は「空のカセットに差し替えた」を表すので、
+      *    -- 触らない (ACTION 空白) とは区別する。
+      *    -- 金種は現在の構成をそのまま渡す。カセットの金種の並びは
+      *    -- 払出 DP の前提 (降順) なので、装填では変えられない。
+           05  CASH-IN-LOAD.
+               10  CASH-LD-ACTION OCCURS 4 TIMES PIC X(01).
+                   88  CASH-LD-REPLACE             VALUE 'R'.
+               10  CASH-LD-DENOM  OCCURS 4 TIMES PIC 9(06).
+               10  CASH-LD-CNT    OCCURS 4 TIMES PIC 9(05).
+      *    -- LOAD による在庫金額の増減。装填バッチが EJ に残す。
+           05  CASH-OUT-LOADED         PIC S9(13)V99 SIGN LEADING SEPARATE.
       *    -- THEORY が返す、帳簿上あるべき枚数と当日の増減。
       *    -- 実査枚数との比較は呼出元 (締めバッチ) が行う。ここは
       *    -- 「帳簿がどうなっているか」だけを答える。

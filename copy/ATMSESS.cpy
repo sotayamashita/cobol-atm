@@ -43,6 +43,9 @@
                88  SESS-TT-DEPOSIT             VALUE 'DP'.
                88  SESS-TT-TRANSFER            VALUE 'TR'.
                88  SESS-TT-PIN-CHANGE          VALUE 'PC'.
+      *        -- カセット装填。利用者の取引ではないが、現金が動く以上
+      *        -- EJ に残さないと締めの差異が装填由来か判らなくなる。
+               88  SESS-TT-CASH-LOAD           VALUE 'LD'.
            05  SESS-TXN-AMOUNT         PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-TXN-FEE            PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-CPTY-BANK-CD       PIC X(04).

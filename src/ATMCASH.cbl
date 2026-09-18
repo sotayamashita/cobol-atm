@@ -56,6 +56,7 @@
            05  WS-REMAIN               PIC S9(13)V99 VALUE ZERO.
            05  WS-AMT-INT              PIC S9(13) VALUE ZERO.
            05  WS-DEP-SUM              PIC S9(13)V99 VALUE ZERO.
+           05  WS-LOAD-DIFF            PIC S9(13)V99 VALUE ZERO.
 
       *    -- DP 表。添字は c=1..5 (1 が c=0 に相当), u=1..1001 (1 が u=0)
        01  WS-DP-TABLE.
@@ -84,6 +85,7 @@
                WHEN CASH-FN-CLOSE     PERFORM CLOSE-CASH
                WHEN CASH-FN-THEORY    PERFORM REPORT-THEORY
                WHEN CASH-FN-SETTLE    PERFORM DO-SETTLE
+               WHEN CASH-FN-LOAD      PERFORM DO-LOAD
                WHEN OTHER
                    MOVE RC-FATAL TO CASH-OUT-RETCODE
            END-EVALUATE
@@ -378,6 +380,52 @@
            MOVE CASH-DISPENSED-TODAY TO CASH-OUT-DISPENSED
            MOVE CASH-DEPOSITED-TODAY TO CASH-OUT-DEPOSITED.
        THR-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * LOAD : カセット装填。ACTION が 'R' のカセットだけ枚数を置き換える。
+      *   加算ではなく置換にするのは、装填が「カセットを用意したものに
+      *   差し替える」物理操作だからである。差し替えた以上、前の枚数は
+      *   残らない。
+      *   差し替えたカセットは障害 (F) を引き継がない。障害は現物に
+      *   付く状態で、現物が変わればついてこない。触らなかったカセットの
+      *   状態は変えない。
+      *   在庫金額の増減を CASH-OUT-LOADED に返す。装填バッチはこれを
+      *   EJ に残し、締めの差異が装填由来かを追えるようにする。
+      *----------------------------------------------------------------
+       DO-LOAD SECTION.
+       LOD-START.
+           PERFORM LOAD-CASSETTE
+           IF CASH-OUT-RETCODE NOT = RC-OK
+               GO TO LOD-EXIT
+           END-IF
+
+      *    -- 在庫を書き換える前に全件検証する。書きながら弾くと、
+      *    -- 一部だけ装填された在庫が残る。
+           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
+               IF CASH-LD-REPLACE(WS-C)
+                  AND CASH-LD-DENOM(WS-C) NOT = CASH-DENOM(WS-C)
+                   MOVE RC-BUSINESS-ERROR   TO CASH-OUT-RETCODE
+                   MOVE EC-CASH-LOAD-DETAIL TO CASH-OUT-ERROR-CODE
+                   GO TO LOD-EXIT
+               END-IF
+           END-PERFORM
+
+           MOVE ZERO TO WS-LOAD-DIFF
+           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
+               IF CASH-LD-REPLACE(WS-C)
+                   COMPUTE WS-LOAD-DIFF = WS-LOAD-DIFF
+                       + (CASH-LD-CNT(WS-C) - CASH-NOTE-CNT(WS-C))
+                         * CASH-DENOM(WS-C)
+                   MOVE CASH-LD-CNT(WS-C) TO CASH-NOTE-CNT(WS-C)
+                   SET CASH-ST-OK(WS-C)   TO TRUE
+               END-IF
+           END-PERFORM
+
+           MOVE WS-LOAD-DIFF TO CASH-OUT-LOADED
+           PERFORM REFRESH-CASSETTE-STATUS
+           PERFORM SAVE-CASSETTE.
+       LOD-EXIT.
            EXIT.
 
       *----------------------------------------------------------------

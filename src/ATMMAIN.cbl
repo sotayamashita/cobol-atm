@@ -13,6 +13,8 @@
       *   [入金]  紙幣は一時保留部に収納済みとみなす。
       *           EJ(START) → 記帳 → 金庫収納 → EJ(END)
       *           収納に失敗した場合は紙幣を返却し記帳を取り消す。
+      *           投入額は金種別計数機が数えた枚数から導く。金額を
+      *           別に入力させると数えた紙幣と食い違い得るため。
       *
       *   セッション ID は 1 カード投入につき 1 つ。取引 ID は取引ごと。
       *   EJ にはこの 2 つを常に出力し、事後の追跡を可能にする。
@@ -367,8 +369,8 @@
        TD-START.
            PERFORM START-TRANSACTION
            SET SESS-TT-DEPOSIT    TO TRUE
-           DISPLAY '紙幣を投入してください (金額を入力):'
-           PERFORM ACCEPT-AMOUNT
+           DISPLAY '紙幣を投入してください。'
+           PERFORM ACCEPT-DEPOSIT-NOTES
            IF WS-NUM-AMOUNT = ZERO
                GO TO TD-EXIT
            END-IF
@@ -398,6 +400,7 @@
                GO TO TD-EXIT
            END-IF
 
+           PERFORM SHOW-DEPOSIT-DETAIL
            PERFORM SHOW-BALANCE-AFTER
            PERFORM WRITE-JRNL-END-OK.
        TD-EXIT.
@@ -551,6 +554,48 @@
        AA-EXIT.
            EXIT.
 
+      *----------------------------------------------------------------
+      * 入金は金額ではなく金種別の枚数を受け取る。金種別計数機が数えた
+      * 結果を模擬するためで、投入金額を別に入力させると「入力額」と
+      * 「数えた紙幣」が食い違い得る。枚数だけを真とし、金額はそこから
+      * 導く。カセットの金種構成は現金機構が持つので THEORY (照会のみ)
+      * で取得して提示する。
+      *----------------------------------------------------------------
+       ACCEPT-DEPOSIT-NOTES SECTION.
+       ADN-START.
+           MOVE ZERO TO WS-NUM-AMOUNT
+
+           SET CASH-FN-THEORY TO TRUE
+           CALL 'ATMCASH' USING CASH-PARM ATM-SESSION
+           IF CASH-OUT-RETCODE NOT = RC-OK
+               MOVE CASH-OUT-ERROR-CODE TO SESS-ERROR-CODE
+               PERFORM SHOW-ERROR
+               GO TO ADN-EXIT
+           END-IF
+
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > CN-CASSETTE-CNT
+               MOVE CASH-TH-DENOM(WS-I) TO CASH-DP-DENOM(WS-I)
+               MOVE ZERO                TO CASH-DP-CNT(WS-I)
+               MOVE CASH-TH-DENOM(WS-I) TO WS-ED-DENOM
+               DISPLAY WS-ED-DENOM ' 円券の枚数:'
+      *        -- 入力前に必ず消す。入力が尽きた場合 ACCEPT は項目を
+      *        -- 変えないため、前の金種の枚数が残る。
+               MOVE SPACES TO WS-IN-AMOUNT
+               ACCEPT WS-IN-AMOUNT
+               IF FUNCTION TEST-NUMVAL (WS-IN-AMOUNT) = ZERO
+                   COMPUTE CASH-DP-CNT(WS-I) =
+                       FUNCTION NUMVAL (WS-IN-AMOUNT)
+               END-IF
+               COMPUTE WS-NUM-AMOUNT = WS-NUM-AMOUNT
+                   + CASH-DP-CNT(WS-I) * CASH-DP-DENOM(WS-I)
+           END-PERFORM
+
+           IF WS-NUM-AMOUNT = ZERO
+               DISPLAY '紙幣が投入されていません。'
+           END-IF.
+       ADN-EXIT.
+           EXIT.
+
        COPY-POST-RESULT SECTION.
        CPR-START.
            MOVE POST-OUT-FEE        TO SESS-TXN-FEE
@@ -604,6 +649,24 @@
                END-IF
            END-PERFORM.
        SDD-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 数えた紙幣を利用者へ示す。金額だけ出すと計数違いに気づけない。
+      *----------------------------------------------------------------
+       SHOW-DEPOSIT-DETAIL SECTION.
+       SDP-START.
+           DISPLAY ' '
+           DISPLAY '  お預かり金種:'
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > CN-CASSETTE-CNT
+               IF CASH-DP-CNT(WS-I) > ZERO
+                   MOVE CASH-DP-DENOM(WS-I) TO WS-ED-DENOM
+                   MOVE CASH-DP-CNT(WS-I)   TO WS-ED-NOTES
+                   DISPLAY '    ' WS-ED-DENOM ' 円券 x ' WS-ED-NOTES
+                           ' 枚'
+               END-IF
+           END-PERFORM.
+       SDP-EXIT.
            EXIT.
 
       *----------------------------------------------------------------
@@ -661,6 +724,9 @@
                        TO SESS-ERROR-MESSAGE
                WHEN EC-CASH-NO-COMBINATION
                    MOVE '金種の都合によりお取扱いできません'
+                       TO SESS-ERROR-MESSAGE
+               WHEN EC-CASH-DEPOSIT-DETAIL
+                   MOVE 'お預かりした紙幣を確認できませんでした'
                        TO SESS-ERROR-MESSAGE
                WHEN EC-BANK-UNKNOWN
                    MOVE 'お振込先の金融機関が見つかりません'

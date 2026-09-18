@@ -12,6 +12,8 @@
       *   PLAN は在庫を減らさない (照会のみ)。実際の減算は DISPENSE。
       *   PLAN と DISPENSE を分けるのは、記帳成功後に初めて紙幣を
       *   繰り出すという順序を守るため。
+      *   入金は金種別計数機が数えた内訳をそのまま在庫へ加算する。
+      *   金額からの推定はしない (DO-ACCEPT を参照)。
       *****************************************************************
        IDENTIFICATION DIVISION.
        PROGRAM-ID. ATMCASH.
@@ -53,6 +55,8 @@
            05  WS-PLAN-CNT             PIC S9(05) COMP OCCURS 4 TIMES.
            05  WS-REMAIN               PIC S9(13)V99 VALUE ZERO.
            05  WS-AMT-INT              PIC S9(13) VALUE ZERO.
+           05  WS-DEP-SUM              PIC S9(13)V99 VALUE ZERO.
+           05  WS-LOAD-DIFF            PIC S9(13)V99 VALUE ZERO.
 
       *    -- DP 表。添字は c=1..5 (1 が c=0 に相当), u=1..1001 (1 が u=0)
        01  WS-DP-TABLE.
@@ -81,6 +85,7 @@
                WHEN CASH-FN-CLOSE     PERFORM CLOSE-CASH
                WHEN CASH-FN-THEORY    PERFORM REPORT-THEORY
                WHEN CASH-FN-SETTLE    PERFORM DO-SETTLE
+               WHEN CASH-FN-LOAD      PERFORM DO-LOAD
                WHEN OTHER
                    MOVE RC-FATAL TO CASH-OUT-RETCODE
            END-EVALUATE
@@ -97,7 +102,18 @@
            ELSE
                MOVE RC-IO-ERROR  TO CASH-OUT-RETCODE
                MOVE EC-SYSTEM-IO TO CASH-OUT-ERROR-CODE
-           END-IF.
+               GO TO OPEN-C-EXIT
+           END-IF
+
+      *    -- 金種の並びは据付構成で取引ごとに変わらない。開局時に一度
+      *    -- 返しておけば、呼出元が取引のたびに在庫を読み直さずに済む。
+           PERFORM LOAD-CASSETTE
+           IF CASH-OUT-RETCODE NOT = RC-OK
+               GO TO OPEN-C-EXIT
+           END-IF
+           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
+               MOVE CASH-DENOM(WS-C) TO CASH-LO-DENOM(WS-C)
+           END-PERFORM.
        OPEN-C-EXIT.
            EXIT.
 
@@ -271,8 +287,11 @@
            EXIT.
 
       *----------------------------------------------------------------
-      * ACCEPT : 入金収納。金種別計数機を持たない簡易機の想定として、
-      *          最大金種から詰める前提で在庫に加算する。
+      * ACCEPT : 入金収納。金種別計数機が数えた内訳 (CASH-IN-DEPOSIT)
+      *          どおりに在庫へ加算する。
+      *   投入金額から金種を推定してはならない。推定は「万券から詰める」
+      *   といった仮定を置くことになり、実際に入った紙幣と在庫の金種
+      *   内訳がずれる。ずれると締めの現金突合が成立しない。
       *----------------------------------------------------------------
        DO-ACCEPT SECTION.
        ACC-START.
@@ -286,22 +305,53 @@
                GO TO ACC-EXIT
            END-IF
 
-           MOVE CASH-IN-AMOUNT TO WS-REMAIN
+      *    -- 在庫へ加算する前に内訳を全件検証する。検証しながら
+      *    -- 加算すると、途中で弾いたときに一部だけ増えた在庫が残る。
+           PERFORM VALIDATE-DEPOSIT-DETAIL
+           IF CASH-OUT-RETCODE NOT = RC-OK
+               GO TO ACC-EXIT
+           END-IF
+
            PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
-               IF CASH-DENOM(WS-C) > ZERO
-                   COMPUTE WS-K = WS-REMAIN / CASH-DENOM(WS-C)
-                   IF WS-K > ZERO
-                       ADD WS-K TO CASH-NOTE-CNT(WS-C)
-                       COMPUTE WS-REMAIN =
-                           WS-REMAIN - WS-K * CASH-DENOM(WS-C)
-                   END-IF
-               END-IF
+               ADD CASH-DP-CNT(WS-C)   TO CASH-NOTE-CNT(WS-C)
+               MOVE CASH-DP-CNT(WS-C)   TO SESS-DEP-CNT(WS-C)
+               MOVE CASH-DENOM(WS-C)    TO SESS-DEP-DENOM(WS-C)
            END-PERFORM
 
            ADD CASH-IN-AMOUNT TO CASH-DEPOSITED-TODAY
            PERFORM REFRESH-CASSETTE-STATUS
            PERFORM SAVE-CASSETTE.
        ACC-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 入金内訳の検証。内訳の添字はカセット番号と一致する約束なので
+      * (CASHIF.cpy)、金種が同じ位置で揃っているかを見れば足りる。
+      * 揃っていなければ呼出元が別の並びで渡しており、そのまま加算すると
+      * 在庫が壊れる。合計が記帳額と一致することまで確かめてから返す。
+      *----------------------------------------------------------------
+       VALIDATE-DEPOSIT-DETAIL SECTION.
+       VDD-START.
+           MOVE ZERO TO WS-DEP-SUM
+           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
+               IF CASH-DP-CNT(WS-C) > ZERO
+                   IF CASH-DP-DENOM(WS-C) NOT = CASH-DENOM(WS-C)
+                       MOVE RC-BUSINESS-ERROR      TO CASH-OUT-RETCODE
+                       MOVE EC-CASH-DEPOSIT-DETAIL TO
+                            CASH-OUT-ERROR-CODE
+                       GO TO VDD-EXIT
+                   END-IF
+                   COMPUTE WS-DEP-SUM = WS-DEP-SUM
+                       + CASH-DP-CNT(WS-C) * CASH-DP-DENOM(WS-C)
+               END-IF
+           END-PERFORM
+
+      *    -- 記帳額と収納額の一致は在庫と元帳の整合そのもの。
+           IF WS-DEP-SUM NOT = CASH-IN-AMOUNT
+               MOVE RC-BUSINESS-ERROR      TO CASH-OUT-RETCODE
+               MOVE EC-CASH-DEPOSIT-DETAIL TO CASH-OUT-ERROR-CODE
+           END-IF.
+       VDD-EXIT.
            EXIT.
 
       *----------------------------------------------------------------
@@ -330,6 +380,52 @@
            MOVE CASH-DISPENSED-TODAY TO CASH-OUT-DISPENSED
            MOVE CASH-DEPOSITED-TODAY TO CASH-OUT-DEPOSITED.
        THR-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * LOAD : カセット装填。ACTION が 'R' のカセットだけ枚数を置き換える。
+      *   加算ではなく置換にするのは、装填が「カセットを用意したものに
+      *   差し替える」物理操作だからである。差し替えた以上、前の枚数は
+      *   残らない。
+      *   差し替えたカセットは障害 (F) を引き継がない。障害は現物に
+      *   付く状態で、現物が変わればついてこない。触らなかったカセットの
+      *   状態は変えない。
+      *   在庫金額の増減を CASH-OUT-LOADED に返す。装填バッチはこれを
+      *   EJ に残し、締めの差異が装填由来かを追えるようにする。
+      *----------------------------------------------------------------
+       DO-LOAD SECTION.
+       LOD-START.
+           PERFORM LOAD-CASSETTE
+           IF CASH-OUT-RETCODE NOT = RC-OK
+               GO TO LOD-EXIT
+           END-IF
+
+      *    -- 在庫を書き換える前に全件検証する。書きながら弾くと、
+      *    -- 一部だけ装填された在庫が残る。
+           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
+               IF CASH-LD-REPLACE(WS-C)
+                  AND CASH-LD-DENOM(WS-C) NOT = CASH-DENOM(WS-C)
+                   MOVE RC-BUSINESS-ERROR   TO CASH-OUT-RETCODE
+                   MOVE EC-CASH-LOAD-DETAIL TO CASH-OUT-ERROR-CODE
+                   GO TO LOD-EXIT
+               END-IF
+           END-PERFORM
+
+           MOVE ZERO TO WS-LOAD-DIFF
+           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
+               IF CASH-LD-REPLACE(WS-C)
+                   COMPUTE WS-LOAD-DIFF = WS-LOAD-DIFF
+                       + (CASH-LD-CNT(WS-C) - CASH-NOTE-CNT(WS-C))
+                         * CASH-DENOM(WS-C)
+                   MOVE CASH-LD-CNT(WS-C) TO CASH-NOTE-CNT(WS-C)
+                   SET CASH-ST-OK(WS-C)   TO TRUE
+               END-IF
+           END-PERFORM
+
+           MOVE WS-LOAD-DIFF TO CASH-OUT-LOADED
+           PERFORM REFRESH-CASSETTE-STATUS
+           PERFORM SAVE-CASSETTE.
+       LOD-EXIT.
            EXIT.
 
       *----------------------------------------------------------------

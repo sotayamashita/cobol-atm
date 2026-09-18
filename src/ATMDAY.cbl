@@ -43,7 +43,7 @@
       *    -- ことはないが、溢れた場合は帳票で明示する。
            05  WS-MAX-OPEN-TXN         PIC S9(04) COMP VALUE 500.
            05  WS-MAX-RECON            PIC S9(04) COMP VALUE 500.
-           05  WS-TXN-TYPE-CNT         PIC S9(04) COMP VALUE 5.
+           05  WS-TXN-TYPE-CNT         PIC S9(04) COMP VALUE 6.
 
       *    -- EJ 走査中、まだ E が来ていない取引
        01  WS-OPEN-TXN-TABLE.
@@ -66,11 +66,12 @@
            05  FILLER PIC X(02) VALUE 'DP'.
            05  FILLER PIC X(02) VALUE 'TR'.
            05  FILLER PIC X(02) VALUE 'PC'.
+           05  FILLER PIC X(02) VALUE 'LD'.
        01  WS-SUM-TYPE-LIST REDEFINES WS-SUM-TYPES.
-           05  WS-SUM-TYPE OCCURS 5 TIMES PIC X(02).
+           05  WS-SUM-TYPE OCCURS 6 TIMES PIC X(02).
 
        01  WS-SUMMARY-TABLE.
-           05  WS-SUM-ENTRY OCCURS 5 TIMES.
+           05  WS-SUM-ENTRY OCCURS 6 TIMES.
                10  WS-SUM-CNT          PIC 9(07).
                10  WS-SUM-AMT          PIC S9(13)V99.
 

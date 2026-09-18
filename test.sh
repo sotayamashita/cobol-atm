@@ -11,7 +11,8 @@ mkdir -p data
 filter() { grep -E '取引後残高|現在残高|お引出し可能|手数料|変更しました|円券 x|\[[0-9]{4}\]|お預かり' || true; }
 
 echo "### 1. 照会 → 38,000 円出金 → 10,000 円入金 → 照会"
-printf '4900123456780001\n1234\n1\n2\n38000\n3\n10000\n1\n9\n\n' | ./bin/atm | filter
+# 入金は金額ではなく金種ごとの枚数を入れる (1万 x1、5千・2千・千は 0)。
+printf '4900123456780001\n1234\n1\n2\n38000\n3\n1\n0\n0\n0\n1\n9\n\n' | ./bin/atm | filter
 
 echo "### 2. 1 回限度超過 → 貸越内出金 → 凍結口座へ振込"
 printf '4900123456780002\n9999\n2\n60000\n2\n30000\n4\n1000000003\n5000\n9\n\n' | ./bin/atm | filter
@@ -91,6 +92,24 @@ open(p,'w',encoding='utf-8').write(chr(10).join(out)+chr(10))
 reopen_close_state
 ./bin/atmday | close_filter
 grep -oE '\[(PN|ZU|CD|RF)\] [^ ]+' data/atmrpt.txt || true
+
+echo "### 9c. カセット装填"
+# 装填は枚数の置換。加算ではないので、装填後の枚数をそのまま入れる。
+load_filter() {
+  grep -E '円券 x|在庫増減|変更していません|範囲外|正しくありません|\[[0-9]{4}\]' || true
+}
+
+echo "-- 2 千券を 150 枚、千券を 500 枚に装填"
+printf '\n\n150\n500\n' | ./bin/atmload | load_filter
+
+echo "-- 全て空入力 (在庫も EJ も動かさない)"
+printf '\n\n\n\n' | ./bin/atmload | load_filter
+
+echo "-- 負数・非数値・範囲外は弾く"
+printf -- '-5\nabc\n999999\n\n' | ./bin/atmload | load_filter
+
+echo "-- EJ に装填が残るか (LD)"
+grep -c 'LD' data/atmjrnl.dat
 
 echo "### 10. 手数料マスタ (曜日区分 × 時間帯 × カード区分)"
 sort data/atmfee.dat

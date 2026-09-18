@@ -3,12 +3,18 @@ COBFLAGS  := -Wall -I copy -std=cobol2002 -ftext-column=250
 BIN       := bin
 MODULES   := ATMAUTH ATMACCT ATMPOST ATMCASH ATMJRNL ATMCAL ATMZGN ATMCLS
 
-.PHONY: all seed run close test clean journal
+.PHONY: all seed run close load test clean journal
 
-all: $(BIN)/atm $(BIN)/atmseed $(BIN)/atmday $(BIN)/caltest $(BIN)/zgntest
+all: $(BIN)/atm $(BIN)/atmseed $(BIN)/atmday $(BIN)/atmload \
+     $(BIN)/caltest $(BIN)/zgntest
 
 # 日次締めバッチ。端末が停止している時間帯に流す
 $(BIN)/atmday: src/ATMDAY.cbl src/ATMJRNL.cbl src/ATMCASH.cbl src/ATMRPT.cbl src/ATMCLS.cbl
+	@mkdir -p $(BIN) data
+	$(COBC) -x $(COBFLAGS) -o $@ $^
+
+# カセット装填バッチ。締めと同じく端末が停止している時間帯に流す
+$(BIN)/atmload: src/ATMLOAD.cbl src/ATMCASH.cbl src/ATMJRNL.cbl src/ATMCLS.cbl
 	@mkdir -p $(BIN) data
 	$(COBC) -x $(COBFLAGS) -o $@ $^
 
@@ -40,6 +46,10 @@ run: all
 # 日次締め。端末が停止している時間帯に流す
 close: all
 	./$(BIN)/atmday
+
+# カセット装填。端末が停止している時間帯に流す
+load: all
+	./$(BIN)/atmload
 
 test: all
 	./test.sh

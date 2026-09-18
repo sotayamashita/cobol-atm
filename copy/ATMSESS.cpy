@@ -43,6 +43,9 @@
                88  SESS-TT-DEPOSIT             VALUE 'DP'.
                88  SESS-TT-TRANSFER            VALUE 'TR'.
                88  SESS-TT-PIN-CHANGE          VALUE 'PC'.
+      *        -- カセット装填。利用者の取引ではないが、現金が動く以上
+      *        -- EJ に残さないと締めの差異が装填由来か判らなくなる。
+               88  SESS-TT-CASH-LOAD           VALUE 'LD'.
            05  SESS-TXN-AMOUNT         PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-TXN-FEE            PIC S9(13)V99 SIGN LEADING SEPARATE.
            05  SESS-CPTY-BANK-CD       PIC X(04).
@@ -65,3 +68,9 @@
            05  SESS-DISPENSE.
                10  SESS-DSP-DENOM OCCURS 4 TIMES PIC 9(06).
                10  SESS-DSP-CNT   OCCURS 4 TIMES PIC 9(03).
+      *    -- 収納金種 (ATMCASH が設定)。払出と同じく、確定した結果を
+      *    -- ここへ載せてから画面に出す。CALL パラメタ域は次の呼出で
+      *    -- 上書きされ得るので、取引の状態を置く場所にしない。
+           05  SESS-DEPOSIT.
+               10  SESS-DEP-DENOM OCCURS 4 TIMES PIC 9(06).
+               10  SESS-DEP-CNT   OCCURS 4 TIMES PIC 9(03).

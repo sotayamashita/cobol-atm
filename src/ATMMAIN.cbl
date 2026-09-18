@@ -762,6 +762,9 @@
                WHEN EC-ZENGIN-TIMEOUT
                    MOVE '結果を確認できませんでした'
                        TO SESS-ERROR-MESSAGE
+               WHEN EC-HOST-NO-ANSWER
+                   MOVE 'ただいまお取扱いできません'
+                       TO SESS-ERROR-MESSAGE
                WHEN EC-SYSTEM-BUSY
                    MOVE '混み合っています。少々お待ちください'
                        TO SESS-ERROR-MESSAGE

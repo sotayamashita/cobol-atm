@@ -92,6 +92,7 @@
 
            PERFORM SEED-ACCOUNTS
            PERFORM SEED-CARDS
+           PERFORM SEED-CARD-HOST-NG
            PERFORM SEED-CASSETTE
            PERFORM SEED-BANKS
            PERFORM SEED-FEES
@@ -140,6 +141,23 @@
            MOVE 80000.00     TO ACCT-AVAILABLE-BAL
            MOVE ZERO         TO ACCT-HOLD-AMT
            MOVE 100000.00    TO ACCT-OVERDRAFT-LIMIT
+           MOVE 20260917     TO ACCT-LAST-TXN-DATE
+           MOVE 1            TO ACCT-VERSION
+           WRITE ACCT-RECORD END-WRITE
+
+      *    -- ホストが応答しない口座 (成否不明の経路の検証用)。
+      *    -- 口座としては正常で、ATMHOST が記帳要求に黙る。
+           MOVE SPACES TO ACCT-RECORD
+           MOVE '1000000009' TO ACCT-NO
+           MOVE CN-BRANCH-CD TO ACCT-BRANCH-CD
+           SET  ACCT-TP-SAVINGS TO TRUE
+           MOVE 'JPY'        TO ACCT-CURRENCY
+           MOVE '佐藤 次郎'   TO ACCT-HOLDER-NAME
+           SET  ACCT-ST-NORMAL TO TRUE
+           MOVE 200000.00    TO ACCT-LEDGER-BAL
+           MOVE 200000.00    TO ACCT-AVAILABLE-BAL
+           MOVE ZERO         TO ACCT-HOLD-AMT
+           MOVE ZERO         TO ACCT-OVERDRAFT-LIMIT
            MOVE 20260917     TO ACCT-LAST-TXN-DATE
            MOVE 1            TO ACCT-VERSION
            WRITE ACCT-RECORD END-WRITE
@@ -559,6 +577,32 @@
       * 払出明細の表示順を自然にするため降順で定義する。
       * 2,000 円券は意図的に少枚数とし、金種不足系の検証を可能にする。
       *----------------------------------------------------------------
+       SEED-CARD-HOST-NG SECTION.
+       SCH-START.
+           MOVE SPACES TO CARD-RECORD
+           MOVE '4900123456780009' TO CARD-PAN
+           MOVE '1000000009'       TO CARD-ACCT-NO
+           MOVE '佐藤 次郎'         TO CARD-HOLDER-NAME
+           MOVE 202812             TO CARD-EXPIRY-YYYYMM
+           MOVE 24681357           TO CARD-PIN-SALT
+           MOVE 1234               TO WS-PIN-NUM
+           PERFORM CALC-HASH
+           SET  CARD-ST-ACTIVE TO TRUE
+           MOVE ZERO     TO CARD-PIN-FAIL-CNT
+           MOVE ZERO     TO CARD-LAST-USED-DATE
+           MOVE ZERO     TO CARD-DAILY-DATE
+           MOVE ZERO     TO CARD-DAILY-WD-AMT
+           MOVE ZERO     TO CARD-DAILY-WD-CNT
+           MOVE 200000.00 TO CARD-LIMIT-PER-TXN
+           MOVE 500000.00 TO CARD-LIMIT-DAILY-AMT
+           MOVE 10       TO CARD-LIMIT-DAILY-CNT
+           SET  CARD-MD-MAGNETIC TO TRUE
+           SET  CARD-BIO-NO      TO TRUE
+           SET  CARD-KD-OWN      TO TRUE
+           WRITE CARD-RECORD END-WRITE.
+       SCH-EXIT.
+           EXIT.
+
        SEED-CASSETTE SECTION.
        SD-START.
            MOVE SPACES TO CASH-RECORD

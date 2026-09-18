@@ -1,7 +1,8 @@
 COBC      := cobc
 COBFLAGS  := -Wall -I copy -std=cobol2002 -ftext-column=250
 BIN       := bin
-MODULES   := ATMAUTH ATMACCT ATMPOST ATMCASH ATMJRNL ATMCAL ATMZGN ATMCLS
+MODULES   := ATMAUTH ATMACCT ATMHOST ATMPOST ATMCASH ATMJRNL ATMCAL \
+             ATMZGN ATMCLS
 
 .PHONY: all seed run close load purge test clean journal
 

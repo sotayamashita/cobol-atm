@@ -42,6 +42,9 @@
            SELECT HOL-FILE ASSIGN TO 'data/atmhol.dat'
                ORGANIZATION IS LINE SEQUENTIAL
                FILE STATUS IS WS-STATUS.
+           SELECT HOUR-FILE ASSIGN TO 'data/atmhour.dat'
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-STATUS.
            SELECT CLOSE-FILE ASSIGN TO 'data/atmclose.dat'
                ORGANIZATION IS INDEXED
                ACCESS MODE IS RANDOM
@@ -66,6 +69,8 @@
        01  HOL-RECORD.
            05  HOL-DATE                PIC 9(08).
            05  FILLER                  PIC X(32).
+       FD  HOUR-FILE.
+       COPY 'HOURREC.cpy'.
        FD  CLOSE-FILE.
        COPY 'CLOSEREC.cpy'.
 
@@ -83,7 +88,7 @@
        MAIN-START.
            OPEN OUTPUT ACCT-FILE CARD-FILE CASH-FILE
                        BANK-FILE FEE-FILE LIMIT-FILE HOL-FILE
-                       CLOSE-FILE
+                       HOUR-FILE CLOSE-FILE
 
            PERFORM SEED-ACCOUNTS
            PERFORM SEED-CARDS
@@ -92,11 +97,12 @@
            PERFORM SEED-FEES
            PERFORM SEED-LIMITS
            PERFORM SEED-HOLIDAYS
+           PERFORM SEED-HOURS
            PERFORM SEED-CLOSE-STATE
 
            CLOSE ACCT-FILE CARD-FILE CASH-FILE
                  BANK-FILE FEE-FILE LIMIT-FILE HOL-FILE
-                 CLOSE-FILE
+                 HOUR-FILE CLOSE-FILE
            DISPLAY 'マスタを初期化しました。'
            DISPLAY '  口座 1000000001 / カード 4900123456780001'
                    ' / PIN 1234 / 磁気'
@@ -495,6 +501,25 @@
            MOVE 20261123 TO HOL-DATE
            WRITE HOL-RECORD END-WRITE.
        WHL-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 営業時間。既定は 24 時間稼働なので全区分を 00:00-24:00 とする。
+      * 規制を入れる場合はこの値を変える。行を消すと「規制なし」に
+      * なるので、終日休止にしたい場合は 0000-0000 を入れる。
+      *----------------------------------------------------------------
+       SEED-HOURS SECTION.
+       SH-START.
+           MOVE SPACES TO HOUR-RECORD
+           MOVE 0000 TO HOUR-FROM-HHMM
+           MOVE 2400 TO HOUR-TO-HHMM
+           SET HOUR-DT-WEEKDAY  TO TRUE
+           WRITE HOUR-RECORD END-WRITE
+           SET HOUR-DT-SATURDAY TO TRUE
+           WRITE HOUR-RECORD END-WRITE
+           SET HOUR-DT-HOLIDAY  TO TRUE
+           WRITE HOUR-RECORD END-WRITE.
+       SH-EXIT.
            EXIT.
 
       *----------------------------------------------------------------

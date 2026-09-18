@@ -111,8 +111,47 @@ printf -- '-5\nabc\n999999\n\n' | ./bin/atmload | load_filter
 echo "-- EJ に装填が残るか (LD)"
 grep -c 'LD' data/atmjrnl.dat
 
+echo "### 9d. 障害カセットへの入金は受け付けない"
+# カセット 3 (2 千券) の状態を F にする。実際に障害を起こす手段が
+# 無いので、在庫ファイルを直接書き換えて再現する。
+python3 -c "
+p='data/atmcash.dat'
+d=bytearray(open(p,'rb').read())
+i=d.index(b'ATM00001')
+d[i+66:i+67]=b'F'
+open(p,'wb').write(d)
+"
+# テスト 5 で暗証番号を 4321 に変えているので、以降はそれを使う。
+printf '4900123456780001\n4321\n3\n0\n0\n1\n0\n9\n\n' | ./bin/atm | filter
+./bin/atmseed >/dev/null
+
+echo "### 9e. 退避 EJ の保存年限管理"
+# 退避ファイルを人工的に用意する。古い 3 本と、保存年限内の 1 本。
+for d in 20200101 20200102 20240301 20260917; do echo dummy >"data/atmjrnl-$d.dat"; done
+purge_filter() { grep -E '対象|削除|中止|日数|保存年限が' || true; }
+
+echo "-- 保存年限を指定しなければ何もしない"
+printf '\n' | ./bin/atmpurge | purge_filter
+
+echo "-- 確認で Y 以外なら消さない"
+printf '365\nN\n' | ./bin/atmpurge | purge_filter
+find data -name 'atmjrnl-2*.dat' | wc -l | tr -d ' '
+
+echo "-- 確認で Y なら消す (保存年限内の 1 本は残る)"
+printf '365\nY\n' | ./bin/atmpurge | purge_filter
+find data -name 'atmjrnl-2*.dat' | sort
+
+echo "-- 範囲外・非数値は弾く"
+printf -- '-1\n' | ./bin/atmpurge | purge_filter
+printf 'abc\n' | ./bin/atmpurge | purge_filter
+rm -f data/atmjrnl-2*.dat
+
 echo "### 10. 手数料マスタ (曜日区分 × 時間帯 × カード区分)"
 sort data/atmfee.dat
 
 echo "### 11. 限度額マスタ (媒体 × 認証方式)"
 cut -c1-27 data/atmlimit.dat
+
+echo "### 12. 営業時間マスタ (曜日区分 × 時間帯)"
+# 既定は 24 時間稼働。行を消すと規制なし、終日休止は 0000-0000 で表す。
+cut -c1-9 data/atmhour.dat

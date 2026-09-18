@@ -3,6 +3,8 @@
       * PURPOSE : 電子ジャーナル (EJ) 出力モジュール
       * DESIGN  :
       *   - EJ は追記専用。いかなる場合も既存レコードを更新・削除しない。
+      *     例外はファイル単位の削除 (PURGE) だけで、対象は退避済みの
+      *     過去分に限る。現用 EJ のレコードはどの経路でも消えない。
       *   - OPEN 時に既存 EJ を走査して最大シーケンス番号を得る。これは
       *     電源断からの再起動時にシーケンスを継続させるための処置。
       *   - WRITE はレコードを組み立てて即時フラッシュする。取引成立前に
@@ -46,6 +48,15 @@
        01  WS-ARC-DATE                 PIC 9(08) VALUE ZERO.
        01  WS-ARC-CNT                  PIC 9(09) VALUE ZERO.
        01  WS-ARC-EXISTS               PIC X(01) VALUE 'N'.
+       01  WS-PG-INT                   PIC 9(09) VALUE ZERO.
+       01  WS-PG-I                     PIC S9(05) COMP VALUE ZERO.
+      *    -- LIST で見つけた対象。DELETE はこの表だけを消し、走査を
+      *    -- やり直さない。やり直すと、示した集合と消す集合が別々の
+      *    -- 走査結果になり、確認を取った意味が無くなる。
+       01  WS-PG-TABLE.
+           05  WS-PG-MAX               PIC S9(05) COMP VALUE 3660.
+           05  WS-PG-CNT               PIC S9(05) COMP VALUE ZERO.
+           05  WS-PG-DATE OCCURS 3660 TIMES PIC 9(08).
        COPY 'CLSIF.cpy'.
        COPY 'ATMCONST.cpy'.
        COPY 'RETCODE.cpy'.
@@ -67,6 +78,7 @@
                WHEN JRNL-FN-SCAN-NEXT   PERFORM SCAN-NEXT-JOURNAL
                WHEN JRNL-FN-SCAN-CLOSE  PERFORM SCAN-CLOSE-JOURNAL
                WHEN JRNL-FN-ARCHIVE     PERFORM ARCHIVE-JOURNAL
+               WHEN JRNL-FN-PURGE       PERFORM PURGE-ARCHIVES
                WHEN OTHER           MOVE RC-FATAL TO JRNL-OUT-RETCODE
            END-EVALUATE
            GOBACK.
@@ -209,6 +221,93 @@
            PERFORM TRUNCATE-JOURNAL
            MOVE WS-ARC-CNT TO JRNL-OUT-ARCHIVED-CNT.
        ARC-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * PURGE : 指定営業日より前の退避 EJ を対象にする。
+      *   ディレクトリを列挙する標準的な手段が無いので、対象日から
+      *   遡って日付を総当たりし、存在するものだけを表に集める。走査
+      *   日数は呼出元が渡す。無制限に遡ると起点が定まらないためである。
+      *
+      *   LIST が対象を集め、DELETE が集めた表を消す。DELETE で走査を
+      *   やり直さないのは、示した集合と消す集合を同じにするためである。
+      *   別々に走査すると、確認の間に退避が増減したときに、係員が見た
+      *   ものと違うものが消える。LIST を経ずに DELETE を呼べば表は空で、
+      *   何も消えない (安全側)。
+      *
+      *   保存年限そのものは決めない。何日残すかは監査要件であり、
+      *   運用が決めること。ここは言われた日付に従うだけにする。
+      *----------------------------------------------------------------
+       PURGE-ARCHIVES SECTION.
+       PRG-START.
+           IF JRNL-PG-LIST
+               PERFORM COLLECT-PURGE-TARGETS
+           ELSE
+               PERFORM DELETE-PURGE-TARGETS
+           END-IF.
+       PRG-EXIT.
+           EXIT.
+
+       COLLECT-PURGE-TARGETS SECTION.
+       CPT-START.
+           MOVE ZERO TO WS-PG-CNT
+                        JRNL-OUT-PURGED-CNT
+                        JRNL-OUT-PURGE-OLDEST
+                        JRNL-OUT-PURGE-NEWEST
+
+           COMPUTE WS-PG-INT =
+               FUNCTION INTEGER-OF-DATE (JRNL-IN-PURGE-BEFORE) - 1
+
+           PERFORM VARYING WS-PG-I FROM 1 BY 1
+                   UNTIL WS-PG-I > JRNL-IN-PURGE-DAYS
+                      OR WS-PG-INT < 1
+                      OR WS-PG-CNT >= WS-PG-MAX
+               MOVE FUNCTION DATE-OF-INTEGER (WS-PG-INT) TO WS-ARC-DATE
+               PERFORM BUILD-ARCHIVE-NAME
+               PERFORM CHECK-ARCHIVE-EXISTS
+               IF WS-ARC-EXISTS = 'Y'
+                   ADD 1 TO WS-PG-CNT
+                   MOVE WS-ARC-DATE TO WS-PG-DATE(WS-PG-CNT)
+      *            -- 新しい日付から順に見ているので、最初が最新
+                   IF JRNL-OUT-PURGE-NEWEST = ZERO
+                       MOVE WS-ARC-DATE TO JRNL-OUT-PURGE-NEWEST
+                   END-IF
+                   MOVE WS-ARC-DATE TO JRNL-OUT-PURGE-OLDEST
+               END-IF
+               SUBTRACT 1 FROM WS-PG-INT
+           END-PERFORM
+
+           MOVE WS-PG-CNT TO JRNL-OUT-PURGED-CNT.
+       CPT-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 集めた対象を消す。返すのは実際に消せた件数。対象件数をそのまま
+      * 返すと、途中で失敗したときに消えていないものを消したと報告する。
+      *----------------------------------------------------------------
+       DELETE-PURGE-TARGETS SECTION.
+       DPT-START.
+           MOVE ZERO TO JRNL-OUT-PURGED-CNT
+
+           PERFORM VARYING WS-PG-I FROM 1 BY 1 UNTIL WS-PG-I > WS-PG-CNT
+               MOVE WS-PG-DATE(WS-PG-I) TO WS-ARC-DATE
+               PERFORM BUILD-ARCHIVE-NAME
+               DELETE FILE ARC-FILE
+      *        -- DELETE FILE の file status は処理系で意味が揺れる
+      *        -- (消せても 35 を返す実装がある)。消えたかどうかは
+      *        -- 存在を見て判断する。監査対象を消し損ねたまま
+      *        -- 「消した」と報告しないため。
+               PERFORM CHECK-ARCHIVE-EXISTS
+               IF WS-ARC-EXISTS = 'N'
+                   ADD 1 TO JRNL-OUT-PURGED-CNT
+               ELSE
+                   MOVE RC-IO-ERROR TO JRNL-OUT-RETCODE
+               END-IF
+           END-PERFORM
+
+      *    -- 消した対象は表から落とす。続けて呼ばれても二度消さない。
+           MOVE ZERO TO WS-PG-CNT.
+       DPT-EXIT.
            EXIT.
 
        BUILD-ARCHIVE-NAME SECTION.

@@ -3,10 +3,10 @@ COBFLAGS  := -Wall -I copy -std=cobol2002 -ftext-column=250
 BIN       := bin
 MODULES   := ATMAUTH ATMACCT ATMPOST ATMCASH ATMJRNL ATMCAL ATMZGN ATMCLS
 
-.PHONY: all seed run close load test clean journal
+.PHONY: all seed run close load purge test clean journal
 
 all: $(BIN)/atm $(BIN)/atmseed $(BIN)/atmday $(BIN)/atmload \
-     $(BIN)/caltest $(BIN)/zgntest
+     $(BIN)/atmpurge $(BIN)/caltest $(BIN)/zgntest
 
 # 日次締めバッチ。端末が停止している時間帯に流す
 $(BIN)/atmday: src/ATMDAY.cbl src/ATMJRNL.cbl src/ATMCASH.cbl src/ATMRPT.cbl src/ATMCLS.cbl
@@ -15,6 +15,11 @@ $(BIN)/atmday: src/ATMDAY.cbl src/ATMJRNL.cbl src/ATMCASH.cbl src/ATMRPT.cbl src
 
 # カセット装填バッチ。締めと同じく端末が停止している時間帯に流す
 $(BIN)/atmload: src/ATMLOAD.cbl src/ATMCASH.cbl src/ATMJRNL.cbl src/ATMCLS.cbl
+	@mkdir -p $(BIN) data
+	$(COBC) -x $(COBFLAGS) -o $@ $^
+
+# 退避済み EJ の保存年限管理。保存年限は実行時に指定する (既定値なし)
+$(BIN)/atmpurge: src/ATMPURGE.cbl src/ATMJRNL.cbl src/ATMCLS.cbl
 	@mkdir -p $(BIN) data
 	$(COBC) -x $(COBFLAGS) -o $@ $^
 
@@ -50,6 +55,10 @@ close: all
 # カセット装填。端末が停止している時間帯に流す
 load: all
 	./$(BIN)/atmload
+
+# 退避済み EJ の保存年限管理。保存年限を対話で指定する
+purge: all
+	./$(BIN)/atmpurge
 
 test: all
 	./test.sh

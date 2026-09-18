@@ -750,6 +750,9 @@
                WHEN EC-CASH-DEPOSIT-DETAIL
                    MOVE 'お預かりした紙幣を確認できませんでした'
                        TO SESS-ERROR-MESSAGE
+               WHEN EC-CASH-CASSETTE-FAULT
+                   MOVE 'ただいまお預入れできない紙幣があります'
+                       TO SESS-ERROR-MESSAGE
                WHEN EC-BANK-UNKNOWN
                    MOVE 'お振込先の金融機関が見つかりません'
                        TO SESS-ERROR-MESSAGE

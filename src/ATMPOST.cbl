@@ -41,18 +41,23 @@
                ORGANIZATION IS LINE SEQUENTIAL
                FILE STATUS IS WS-FEE-STATUS.
 
+           SELECT HOUR-FILE ASSIGN TO 'data/atmhour.dat'
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-HOUR-STATUS.
+
        DATA DIVISION.
        FILE SECTION.
        FD  FEE-FILE.
        COPY 'FEEREC.cpy'.
 
+       FD  HOUR-FILE.
+       COPY 'HOURREC.cpy'.
+
        WORKING-STORAGE SECTION.
        01  WS-CONST.
            05  WS-MAX-TXN-AMOUNT       PIC S9(13)V99 VALUE 1000000.00.
-      *    -- 24 時間稼働のため既定では全時間帯が営業時間。時間規制を
-      *    -- 導入する際はこの 2 値を変える (外部マスタ化が望ましい)。
-           05  WS-OPEN-HHMM            PIC 9(04) VALUE 0000.
-           05  WS-CLOSE-HHMM           PIC 9(04) VALUE 2400.
+      *    -- 営業時間は曜日区分ごとに変わるのでマスタから引く。
+           05  WS-MAX-HOURS            PIC S9(04) COMP VALUE 10.
 
       *    -- 手数料マスタは起動時に一度だけ読んでテーブルに載せる。
       *    -- 手数料算出は取引のたびに走るため、都度 I/O させない。
@@ -60,6 +65,16 @@
 
        01  WS-FEE-STATUS               PIC X(02) VALUE '00'.
        01  WS-FEE-LOADED               PIC X(01) VALUE 'N'.
+
+       01  WS-HOUR-STATUS              PIC X(02) VALUE '00'.
+       01  WS-HOUR-LOADED              PIC X(01) VALUE 'N'.
+
+       01  WS-HOUR-TABLE.
+           05  WS-HOUR-CNT             PIC S9(04) COMP VALUE ZERO.
+           05  WS-HOUR-ENTRY OCCURS 10 TIMES.
+               10  WS-HOUR-DAY-TYPE    PIC X(01).
+               10  WS-HOUR-FROM-HHMM   PIC 9(04).
+               10  WS-HOUR-TO-HHMM     PIC 9(04).
 
        01  WS-FEE-TABLE.
            05  WS-FEE-CNT              PIC S9(04) COMP VALUE ZERO.
@@ -558,14 +573,66 @@
        CAS-EXIT.
            EXIT.
 
+      *----------------------------------------------------------------
+      * 営業時間: 曜日区分で 1 行を引き、その時間帯の内か外かを見る。
+      * 該当行が無ければ時間規制なし。規制を「設定していない」ことを
+      * 「終日休止」と解釈すると、マスタの整備漏れで端末が全面停止する。
+      * 手数料が「載っていなければ無料」なのと同じ向きの安全側。
+      *----------------------------------------------------------------
        CHECK-SERVICE-HOUR SECTION.
        SVC-START.
+           PERFORM LOAD-HOUR-MASTER
            PERFORM EXTRACT-HHMM
-           IF WS-HHMM < WS-OPEN-HHMM OR WS-HHMM >= WS-CLOSE-HHMM
-               MOVE RC-BUSINESS-ERROR      TO POST-OUT-RETCODE
-               MOVE EC-OUT-OF-SERVICE-HOUR TO POST-OUT-ERROR-CODE
-           END-IF.
+
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > WS-HOUR-CNT
+               IF WS-HOUR-DAY-TYPE(WS-I) = SESS-DAY-TYPE
+                   IF WS-HHMM < WS-HOUR-FROM-HHMM(WS-I)
+                      OR WS-HHMM >= WS-HOUR-TO-HHMM(WS-I)
+                       MOVE RC-BUSINESS-ERROR      TO POST-OUT-RETCODE
+                       MOVE EC-OUT-OF-SERVICE-HOUR TO
+                            POST-OUT-ERROR-CODE
+                   END-IF
+                   GO TO SVC-EXIT
+               END-IF
+           END-PERFORM.
        SVC-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 営業時間マスタは取引のたびに引く小さな表なので、手数料マスタと
+      * 同じく起動時に一度だけ読んでメモリに載せる。
+      *----------------------------------------------------------------
+       LOAD-HOUR-MASTER SECTION.
+       LHM-START.
+           IF WS-HOUR-LOADED = 'Y'
+               GO TO LHM-EXIT
+           END-IF
+           MOVE 'Y'  TO WS-HOUR-LOADED
+           MOVE ZERO TO WS-HOUR-CNT
+
+           OPEN INPUT HOUR-FILE
+           IF WS-HOUR-STATUS NOT = '00' AND WS-HOUR-STATUS NOT = '05'
+               GO TO LHM-EXIT
+           END-IF
+
+           PERFORM UNTIL WS-HOUR-STATUS NOT = '00'
+               READ HOUR-FILE
+                   AT END
+                       EXIT PERFORM
+                   NOT AT END
+                       IF WS-HOUR-CNT < WS-MAX-HOURS
+                           ADD 1 TO WS-HOUR-CNT
+                           MOVE HOUR-DAY-TYPE  TO
+                                WS-HOUR-DAY-TYPE(WS-HOUR-CNT)
+                           MOVE HOUR-FROM-HHMM TO
+                                WS-HOUR-FROM-HHMM(WS-HOUR-CNT)
+                           MOVE HOUR-TO-HHMM   TO
+                                WS-HOUR-TO-HHMM(WS-HOUR-CNT)
+                       END-IF
+               END-READ
+           END-PERFORM
+           CLOSE HOUR-FILE.
+       LHM-EXIT.
            EXIT.
 
       *----------------------------------------------------------------

@@ -329,6 +329,11 @@
       * (CASHIF.cpy)、金種が同じ位置で揃っているかを見れば足りる。
       * 揃っていなければ呼出元が別の並びで渡しており、そのまま加算すると
       * 在庫が壊れる。合計が記帳額と一致することまで確かめてから返す。
+      *
+      * 障害中 (F) のカセットには収納できない。ここで COMPUTE-AVAILABLE
+      * を使わないのは、払出と入金で空 (E) の意味が逆だからである。
+      * 払出では空は「出せない」が、入金では空は「入れられる」。
+      * 空だから入れるのが装填であり、それを弾いては収納できない。
       *----------------------------------------------------------------
        VALIDATE-DEPOSIT-DETAIL SECTION.
        VDD-START.
@@ -338,6 +343,12 @@
                    IF CASH-DP-DENOM(WS-C) NOT = CASH-DENOM(WS-C)
                        MOVE RC-BUSINESS-ERROR      TO CASH-OUT-RETCODE
                        MOVE EC-CASH-DEPOSIT-DETAIL TO
+                            CASH-OUT-ERROR-CODE
+                       GO TO VDD-EXIT
+                   END-IF
+                   IF CASH-ST-FAULT(WS-C)
+                       MOVE RC-BUSINESS-ERROR       TO CASH-OUT-RETCODE
+                       MOVE EC-CASH-CASSETTE-FAULT  TO
                             CASH-OUT-ERROR-CODE
                        GO TO VDD-EXIT
                    END-IF

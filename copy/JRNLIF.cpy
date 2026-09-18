@@ -21,8 +21,23 @@
       *        -- 退避済みファイルは消さない。保存年限は監査要件であり、
       *        -- 削除は運用側が決めること。
                88  JRNL-FN-ARCHIVE             VALUE 'ARCHIVE '.
+      *        -- 退避済み EJ の保存年限管理。保存年限そのものは監査要件
+      *        -- で運用が決めることなので、このモジュールは「いつより
+      *        -- 前を対象にするか」を言われたとおりに扱うだけにする。
+      *        -- 既定値を持たせると、方針を決めないまま消える。
+               88  JRNL-FN-PURGE               VALUE 'PURGE   '.
       *    -- ARCHIVE の退避先を決める営業日
            05  JRNL-IN-ARCHIVE-DATE    PIC 9(08).
+      *    -- PURGE の対象。この営業日より前の退避ファイルを対象とする
+           05  JRNL-IN-PURGE-BEFORE    PIC 9(08).
+      *    -- PURGE で遡る日数。ディレクトリを列挙する標準的な手段が
+      *    -- 無いので日付を総当たりする。走査範囲は呼出元が決める。
+           05  JRNL-IN-PURGE-DAYS      PIC 9(05).
+      *    -- 消す前に対象を示せるよう、数えるだけの実行を用意する。
+      *    -- 元に戻せない操作なので、確認の機会を挟めるようにする。
+           05  JRNL-IN-PURGE-MODE      PIC X(01).
+               88  JRNL-PG-LIST                VALUE 'L'.
+               88  JRNL-PG-DELETE              VALUE 'D'.
            05  JRNL-IN-PHASE           PIC X(01).
                88  JRNL-PH-START               VALUE 'S'.
                88  JRNL-PH-END                 VALUE 'E'.
@@ -35,3 +50,7 @@
            05  JRNL-OUT-EOF            PIC X(01).
            05  JRNL-OUT-RECORD         PIC X(200).
            05  JRNL-OUT-ARCHIVED-CNT   PIC 9(09).
+      *    -- PURGE の対象件数と、その日付の範囲
+           05  JRNL-OUT-PURGED-CNT     PIC 9(09).
+           05  JRNL-OUT-PURGE-OLDEST   PIC 9(08).
+           05  JRNL-OUT-PURGE-NEWEST   PIC 9(08).

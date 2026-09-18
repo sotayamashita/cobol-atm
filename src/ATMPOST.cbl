@@ -5,9 +5,19 @@
       *   検証順序は固定とする。理由は、利用者に返すエラーが端末ごとに
       *   ぶれないようにするため。この順序の所有者はこのモジュールで、
       *   下位モジュールは技術的な結果だけを返す。
+      *   出金:
       *     (1) 金額の形式妥当性     (2) 営業時間
       *     (3) 手数料算出           (4) カード限度額
       *     (5) 口座状態             (6) 支払可能残高
+      *   振替は営業時間とカード限度額を課さない。全銀システム側の
+      *   接続時間と受入限度で別途規制されるため、ここで二重に弾くと
+      *   返すエラーが実態とずれる。順序は
+      *     (1) 金額の形式妥当性     (2) 自他口座の同一性
+      *     (3) 手数料算出           (4) 相手口座の存在と状態
+      *     (5) 自口座の状態         (6) 支払可能残高
+      *   手数料は「カード区分 × 曜日区分 × 取引種別 × 時間帯」の
+      *   四つ組を手数料マスタから引く。時刻だけでは決まらない。
+      *
       *   残高は「元帳残高」と「支払可能残高」を同時に更新する。ATM 取引は
       *   即時反映のため両者は一致するが、将来の保留 (HOLD) 導入時に
       *   ここだけを変更すればよいよう、計算を分離している。
@@ -24,7 +34,18 @@
        IDENTIFICATION DIVISION.
        PROGRAM-ID. ATMPOST.
 
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT FEE-FILE ASSIGN TO 'data/atmfee.dat'
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-FEE-STATUS.
+
        DATA DIVISION.
+       FILE SECTION.
+       FD  FEE-FILE.
+       COPY 'FEEREC.cpy'.
+
        WORKING-STORAGE SECTION.
        01  WS-CONST.
            05  WS-MAX-TXN-AMOUNT       PIC S9(13)V99 VALUE 1000000.00.
@@ -33,16 +54,26 @@
            05  WS-OPEN-HHMM            PIC 9(04) VALUE 0000.
            05  WS-CLOSE-HHMM           PIC 9(04) VALUE 2400.
 
-      *    -- 出金手数料テーブル (時間帯別)。実運用では外部マスタ化する。
-      *       開始時刻 HHMM + 手数料 (円, 9 桁)
+      *    -- 手数料マスタは起動時に一度だけ読んでテーブルに載せる。
+      *    -- 手数料算出は取引のたびに走るため、都度 I/O させない。
+           05  WS-MAX-FEES             PIC S9(04) COMP VALUE 200.
+      *    -- マスタのカード区分は「自行 'O' / 提携 'P'」で、媒体
+      *    -- (SESS-CARD-MEDIA) とは別の軸。ATMPOST はカードマスタを
+      *    -- 読めないので当面は自行固定とする。将来 ATMAUTH が認証時に
+      *    -- セッションへ載せたら、そこから取る。
+           05  WS-CARD-KIND            PIC X(01) VALUE 'O'.
+
+       01  WS-FEE-STATUS               PIC X(02) VALUE '00'.
+       01  WS-FEE-LOADED               PIC X(01) VALUE 'N'.
+
        01  WS-FEE-TABLE.
-           05  FILLER PIC X(13) VALUE '0000000000220'.
-           05  FILLER PIC X(13) VALUE '0845000000000'.
-           05  FILLER PIC X(13) VALUE '1800000000110'.
-           05  FILLER PIC X(13) VALUE '2100000000220'.
-       01  WS-FEE-ENTRIES REDEFINES WS-FEE-TABLE.
-           05  WS-FEE-ENTRY OCCURS 4 TIMES.
+           05  WS-FEE-CNT              PIC S9(04) COMP VALUE ZERO.
+           05  WS-FEE-ENTRY OCCURS 200 TIMES.
+               10  WS-FEE-CARD-KIND    PIC X(01).
+               10  WS-FEE-DAY-TYPE     PIC X(01).
+               10  WS-FEE-TXN-TYPE     PIC X(02).
                10  WS-FEE-FROM-HHMM    PIC 9(04).
+               10  WS-FEE-TO-HHMM      PIC 9(04).
                10  WS-FEE-AMT          PIC 9(09).
 
        01  WS-WORK.
@@ -58,8 +89,11 @@
        COPY 'RETCODE.cpy'.
 
       *    -- 下位モジュール呼出用のパラメタ域
+       COPY 'ATMCONST.cpy'.
        COPY 'ACCTIF.cpy'.
        COPY 'AUTHIF.cpy'.
+       COPY 'CALIF.cpy'.
+       COPY 'ZGNIF.cpy'.
 
        LINKAGE SECTION.
        COPY 'POSTIF.cpy'.
@@ -177,6 +211,8 @@
            END-IF
 
            IF POST-IN-CPTY-ACCT-NO = SESS-ACCT-NO
+              AND (SESS-CPTY-BANK-CD = CN-OWN-BANK-CD
+                   OR SESS-CPTY-BANK-CD = SPACES)
                MOVE RC-BUSINESS-ERROR TO POST-OUT-RETCODE
                MOVE EC-AMOUNT-INVALID TO POST-OUT-ERROR-CODE
                GO TO TR-EXIT
@@ -184,23 +220,107 @@
 
            PERFORM CALC-FEE
 
+           IF SESS-CPTY-BANK-CD = CN-OWN-BANK-CD
+              OR SESS-CPTY-BANK-CD = SPACES
+               PERFORM TRANSFER-IN-HOUSE
+           ELSE
+               PERFORM TRANSFER-VIA-ZENGIN
+           END-IF.
+       TR-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 自行あて。全銀システムを経由せず、口座間で完結させる。
+      *----------------------------------------------------------------
+       TRANSFER-IN-HOUSE SECTION.
+       TIH-START.
       *    -- 相手口座の存在と受入可否を先に確認する。出金だけ成立して
       *    -- 相手が存在しない、という最悪ケースを構造的に避ける。
            PERFORM CHECK-COUNTERPARTY
            IF POST-OUT-RETCODE NOT = RC-OK
-               GO TO TR-EXIT
+               GO TO TIH-EXIT
            END-IF
 
            PERFORM DEBIT-OWN-ACCOUNT
            IF POST-OUT-RETCODE NOT = RC-OK
-               GO TO TR-EXIT
+               GO TO TIH-EXIT
            END-IF
 
            PERFORM CREDIT-COUNTERPARTY
            IF POST-OUT-RETCODE NOT = RC-OK
                PERFORM COMPENSATE-OWN-ACCOUNT
            END-IF.
-       TR-EXIT.
+       TIH-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 他行あて。相手行の口座は当方から見えないので、経路を確認して
+      * から自口座を引き落とし、為替電文を送る。
+      *
+      * 経路確認を引落より先に置くのは自行あてと同じ理由。相手行が
+      * 接続不能と分かっている状態で引き落としても、戻す手間が増える
+      * だけになる。
+      *
+      * 送信がタイムアウトした場合は「失敗」ではなく「成否不明」。
+      * 取消電文を送り、それも通らなければ RC-FATAL を返して上位に
+      * 不確定取引として EJ へ残させる。単純に引落を戻すと、相手行に
+      * 電文が届いていた場合に二重入金になる。
+      *----------------------------------------------------------------
+       TRANSFER-VIA-ZENGIN SECTION.
+       TVZ-START.
+           SET  ZGN-FN-ROUTE TO TRUE
+           MOVE SESS-CPTY-BANK-CD   TO ZGN-IN-BANK-CD
+           MOVE POST-IN-CPTY-ACCT-NO TO ZGN-IN-ACCT-NO
+           MOVE POST-IN-AMOUNT      TO ZGN-IN-AMOUNT
+           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
+
+      *    -- 翌営業日扱いは取引不成立ではない。受け付けたうえで
+      *    -- 入金日を利用者に知らせる。
+           IF ZGN-OUT-RETCODE NOT = RC-OK
+              AND ZGN-OUT-ERROR-CODE NOT = EC-NEXT-BUSINESS-DAY
+               MOVE ZGN-OUT-RETCODE    TO POST-OUT-RETCODE
+               MOVE ZGN-OUT-ERROR-CODE TO POST-OUT-ERROR-CODE
+               GO TO TVZ-EXIT
+           END-IF
+
+           PERFORM DEBIT-OWN-ACCOUNT
+           IF POST-OUT-RETCODE NOT = RC-OK
+               GO TO TVZ-EXIT
+           END-IF
+
+           SET ZGN-FN-SEND TO TRUE
+           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
+           IF ZGN-OUT-RETCODE = RC-OK
+               GO TO TVZ-EXIT
+           END-IF
+
+           IF ZGN-OUT-ERROR-CODE = EC-ZENGIN-TIMEOUT
+               PERFORM CANCEL-ZENGIN-MESSAGE
+           ELSE
+               MOVE ZGN-OUT-ERROR-CODE TO POST-OUT-ERROR-CODE
+               PERFORM COMPENSATE-OWN-ACCOUNT
+           END-IF.
+       TVZ-EXIT.
+           EXIT.
+
+       CANCEL-ZENGIN-MESSAGE SECTION.
+       CZM-START.
+           SET ZGN-FN-CANCEL TO TRUE
+           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION
+
+           IF ZGN-OUT-RETCODE = RC-OK
+      *        -- 取消が通ったので引落を戻せる
+               MOVE EC-ZENGIN-TIMEOUT TO POST-OUT-ERROR-CODE
+               PERFORM COMPENSATE-OWN-ACCOUNT
+               MOVE RC-BUSINESS-ERROR TO POST-OUT-RETCODE
+               MOVE EC-ZENGIN-TIMEOUT TO POST-OUT-ERROR-CODE
+           ELSE
+      *        -- 取消も届かない。相手行に入金されたか判らないため
+      *        -- 引落は戻さない。日次突合と係員対応に委ねる。
+               MOVE RC-FATAL          TO POST-OUT-RETCODE
+               MOVE EC-ZENGIN-TIMEOUT TO POST-OUT-ERROR-CODE
+           END-IF.
+       CZM-EXIT.
            EXIT.
 
       *----------------------------------------------------------------
@@ -420,19 +540,82 @@
            EXIT.
 
       *----------------------------------------------------------------
-      * 手数料: テーブルを上から走査し、該当する最後の区分を採用する
+      * 手数料: カード区分 + 曜日区分 + 取引種別 + 時間帯で 1 行を引く。
+      * 該当行が無ければ手数料ゼロ。マスタに載っていない組合せは
+      * 「無料」と解釈するのが運用上安全なため (取り過ぎを避ける)。
       *----------------------------------------------------------------
        CALC-FEE SECTION.
        FEE-START.
            MOVE ZERO TO POST-OUT-FEE
+           PERFORM LOAD-FEE-MASTER
+           PERFORM RESOLVE-DAY-TYPE
            PERFORM EXTRACT-HHMM
-           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 4
-               IF WS-HHMM >= WS-FEE-FROM-HHMM(WS-I)
+
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > WS-FEE-CNT
+               IF WS-FEE-CARD-KIND(WS-I) = WS-CARD-KIND
+                  AND WS-FEE-DAY-TYPE(WS-I) = SESS-DAY-TYPE
+                  AND WS-FEE-TXN-TYPE(WS-I) = SESS-TXN-TYPE
+                  AND WS-HHMM >= WS-FEE-FROM-HHMM(WS-I)
+                  AND WS-HHMM < WS-FEE-TO-HHMM(WS-I)
+      *            -- 同一区分が重複したら先に読んだ行を採用する
                    MOVE WS-FEE-AMT(WS-I) TO POST-OUT-FEE
+                   EXIT PERFORM
                END-IF
            END-PERFORM
            MOVE POST-OUT-FEE TO SESS-TXN-FEE.
        FEE-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 曜日区分の解決。判定規則 (祝日は日曜扱い等) は ATMCAL が持つ。
+      * 結果をセッションにも残すのは、EJ と上位が同じ区分を見るため。
+      *----------------------------------------------------------------
+       RESOLVE-DAY-TYPE SECTION.
+       RDT-START.
+           SET CAL-FN-DAY-TYPE TO TRUE
+           MOVE SESS-BUSINESS-DATE TO CAL-IN-DATE
+           CALL 'ATMCAL' USING CAL-PARM ATM-SESSION
+           IF CAL-OUT-RETCODE = RC-OK
+               MOVE CAL-OUT-DAY-TYPE TO SESS-DAY-TYPE
+           END-IF.
+       RDT-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * 手数料マスタの読込。起動後 1 回だけ。
+      * マスタが無い場合は空テーブルのまま進み、手数料ゼロとなる。
+      *----------------------------------------------------------------
+       LOAD-FEE-MASTER SECTION.
+       LFM-START.
+           IF WS-FEE-LOADED = 'Y'
+               GO TO LFM-EXIT
+           END-IF
+           MOVE 'Y'  TO WS-FEE-LOADED
+           MOVE ZERO TO WS-FEE-CNT
+
+           OPEN INPUT FEE-FILE
+           IF WS-FEE-STATUS NOT = '00' AND WS-FEE-STATUS NOT = '05'
+               GO TO LFM-EXIT
+           END-IF
+
+           PERFORM UNTIL WS-FEE-STATUS NOT = '00'
+               READ FEE-FILE
+                   AT END
+                       EXIT PERFORM
+                   NOT AT END
+                       IF WS-FEE-CNT < WS-MAX-FEES
+                           ADD 1 TO WS-FEE-CNT
+                           MOVE FEE-CARD-KIND TO WS-FEE-CARD-KIND(WS-FEE-CNT)
+                           MOVE FEE-DAY-TYPE  TO WS-FEE-DAY-TYPE(WS-FEE-CNT)
+                           MOVE FEE-TXN-TYPE  TO WS-FEE-TXN-TYPE(WS-FEE-CNT)
+                           MOVE FEE-FROM-HHMM TO WS-FEE-FROM-HHMM(WS-FEE-CNT)
+                           MOVE FEE-TO-HHMM   TO WS-FEE-TO-HHMM(WS-FEE-CNT)
+                           MOVE FEE-AMOUNT    TO WS-FEE-AMT(WS-FEE-CNT)
+                       END-IF
+               END-READ
+           END-PERFORM
+           CLOSE FEE-FILE.
+       LFM-EXIT.
            EXIT.
 
        EXTRACT-HHMM SECTION.
@@ -509,7 +692,9 @@
        CLOSE-ACCT-FILE SECTION.
        CAF-START.
            SET ACCT-FN-CLOSE TO TRUE
-           CALL 'ATMACCT' USING ACCT-PARM ATM-SESSION.
+           CALL 'ATMACCT' USING ACCT-PARM ATM-SESSION
+           SET ZGN-FN-CLOSE TO TRUE
+           CALL 'ATMZGN' USING ZGN-PARM ATM-SESSION.
        CAF-EXIT.
            EXIT.
 

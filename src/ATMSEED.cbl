@@ -260,7 +260,8 @@
            PERFORM WRITE-FEE-OWN-WEEKDAY
            PERFORM WRITE-FEE-OWN-SATURDAY
            PERFORM WRITE-FEE-OWN-HOLIDAY
-           PERFORM WRITE-FEE-PARTNER.
+           PERFORM WRITE-FEE-PARTNER
+           PERFORM WRITE-FEE-TRANSFER.
        SF-EXIT.
            EXIT.
 
@@ -338,6 +339,43 @@
            MOVE 330 TO FEE-AMOUNT
            WRITE FEE-RECORD END-WRITE.
        WFP-EXIT.
+           EXIT.
+
+      *    -- 振込手数料。出金と違い、時間帯より「自行あて / 他行あて」
+      *    -- で大きく変わるのが実態だが、相手行区分は ATMPOST が
+      *    -- 知る前に手数料を出す必要があるため、当面は時間帯のみで
+      *    -- 持つ。他行あての加算は全銀接続の組込み時に見直す。
+       WRITE-FEE-TRANSFER SECTION.
+       WFT-START.
+           MOVE SPACES TO FEE-RECORD
+           MOVE 'O'  TO FEE-CARD-KIND
+           MOVE 'TR' TO FEE-TXN-TYPE
+
+           MOVE 'W'  TO FEE-DAY-TYPE
+           MOVE 0000 TO FEE-FROM-HHMM
+           MOVE 0845 TO FEE-TO-HHMM
+           MOVE 220  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 0845 TO FEE-FROM-HHMM
+           MOVE 1800 TO FEE-TO-HHMM
+           MOVE 110  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 1800 TO FEE-FROM-HHMM
+           MOVE 2400 TO FEE-TO-HHMM
+           MOVE 220  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 'S'  TO FEE-DAY-TYPE
+           MOVE 0000 TO FEE-FROM-HHMM
+           MOVE 2400 TO FEE-TO-HHMM
+           MOVE 220  TO FEE-AMOUNT
+           WRITE FEE-RECORD END-WRITE
+
+           MOVE 'H'  TO FEE-DAY-TYPE
+           WRITE FEE-RECORD END-WRITE.
+       WFT-EXIT.
            EXIT.
 
        SET-FEE-DEFAULTS SECTION.

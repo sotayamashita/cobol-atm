@@ -40,6 +40,7 @@
            05  WS-IN-NEW-PIN           PIC X(04) VALUE SPACES.
            05  WS-IN-AMOUNT            PIC X(12) VALUE SPACES.
            05  WS-IN-ACCT              PIC X(10) VALUE SPACES.
+           05  WS-IN-BANK              PIC X(04) VALUE SPACES.
            05  WS-NUM-AMOUNT           PIC 9(10) VALUE ZERO.
 
        01  WS-DATETIME.
@@ -116,6 +117,10 @@
        CS-START.
            DISPLAY ' '
            DISPLAY 'カード番号を入力してください (空 Enter で終了):'
+      *    -- 入力前に必ず消す。入力が尽きた場合 ACCEPT は項目を
+      *    -- 書き換えないため、前回のカード番号が残っていると
+      *    -- 同じカードで延々と繰り返してしまう。
+           MOVE SPACES TO WS-IN-PAN
            ACCEPT WS-IN-PAN
            IF WS-IN-PAN = SPACES
                MOVE 'Y' TO WS-TERMINATE
@@ -209,7 +214,13 @@
            DISPLAY '--- お取引をお選びください -------------------'
            DISPLAY '  1: 残高照会   2: お引出し   3: お預入れ'
            DISPLAY '  4: お振込み   5: 暗証番号変更   9: 終了'
-           ACCEPT WS-MENU.
+      *    -- 入力が尽きたときに前回の選択が残らないようにする。
+      *    -- 残るとメニューループが終わらない。
+           MOVE SPACES TO WS-MENU
+           ACCEPT WS-MENU
+           IF WS-MENU = SPACES
+               MOVE '9' TO WS-MENU
+           END-IF.
        SM-EXIT.
            EXIT.
 
@@ -385,6 +396,12 @@
        TT-START.
            PERFORM START-TRANSACTION
            SET SESS-TT-TRANSFER   TO TRUE
+           DISPLAY '金融機関コード (4 桁、空 Enter で当行):'
+           ACCEPT WS-IN-BANK
+           IF WS-IN-BANK = SPACES
+               MOVE CN-OWN-BANK-CD TO WS-IN-BANK
+           END-IF
+           MOVE WS-IN-BANK TO SESS-CPTY-BANK-CD
            DISPLAY 'お振込先口座番号 (10 桁) を入力してください:'
            ACCEPT WS-IN-ACCT
            MOVE WS-IN-ACCT TO SESS-CPTY-ACCT-NO
@@ -539,6 +556,18 @@
                    MOVE 'このカードは無効です' TO SESS-ERROR-MESSAGE
                WHEN EC-PIN-INVALID
                    MOVE '暗証番号が違います' TO SESS-ERROR-MESSAGE
+               WHEN EC-MEDIA-UNSUPPORTED
+                   MOVE 'このカードはお取扱いできません'
+                       TO SESS-ERROR-MESSAGE
+               WHEN EC-BIO-NOT-ENROLLED
+                   MOVE '生体認証のご登録がありません'
+                       TO SESS-ERROR-MESSAGE
+               WHEN EC-BIO-MISMATCH
+                   MOVE '生体認証を確認できませんでした'
+                       TO SESS-ERROR-MESSAGE
+               WHEN EC-IC-AUTH-FAILED
+                   MOVE 'このカードは確認できませんでした'
+                       TO SESS-ERROR-MESSAGE
                WHEN EC-ACCT-UNKNOWN
                    MOVE '口座が見つかりません' TO SESS-ERROR-MESSAGE
                WHEN EC-ACCT-FROZEN
@@ -573,6 +602,15 @@
                        TO SESS-ERROR-MESSAGE
                WHEN EC-CASH-NO-COMBINATION
                    MOVE '金種の都合によりお取扱いできません'
+                       TO SESS-ERROR-MESSAGE
+               WHEN EC-BANK-UNKNOWN
+                   MOVE 'お振込先の金融機関が見つかりません'
+                       TO SESS-ERROR-MESSAGE
+               WHEN EC-BANK-OFFLINE
+                   MOVE 'お振込先の金融機関へ接続できません'
+                       TO SESS-ERROR-MESSAGE
+               WHEN EC-ZENGIN-TIMEOUT
+                   MOVE '結果を確認できませんでした'
                        TO SESS-ERROR-MESSAGE
                WHEN EC-SYSTEM-BUSY
                    MOVE '混み合っています。少々お待ちください'

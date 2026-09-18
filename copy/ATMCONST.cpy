@@ -7,6 +7,9 @@
        01  ATM-CONST.
            05  CN-ATM-ID               PIC X(08) VALUE 'ATM00001'.
            05  CN-BRANCH-CD            PIC X(03) VALUE '001'.
+      *    -- 自行の金融機関コード。振込先がこれと同じなら全銀システムを
+      *    -- 経由せず、自行内の口座間で完結させる。
+           05  CN-OWN-BANK-CD          PIC X(04) VALUE '0001'.
       *    -- カセット本数。OCCURS はリテラルを要求するため、
       *    -- 各コピー句の OCCURS 4 と必ず同じ値にすること。
            05  CN-CASSETTE-CNT         PIC 9(02) VALUE 4.

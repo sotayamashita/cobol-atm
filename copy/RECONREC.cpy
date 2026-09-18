@@ -29,4 +29,6 @@
            05  RCN-EXPECTED            PIC S9(09) SIGN LEADING SEPARATE.
            05  RCN-ACTUAL              PIC S9(09) SIGN LEADING SEPARATE.
            05  RCN-ERROR-CODE          PIC X(04).
-           05  FILLER                  PIC X(31).
+      *    -- レコード長は 128 バイト。RPTIF の RPT-IN-RECON と同じ長さ
+      *    -- にしておかないと、帳票へ渡す途中で末尾が欠ける。
+           05  FILLER                  PIC X(24).

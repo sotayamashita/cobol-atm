@@ -29,7 +29,7 @@
 
        01  WS-CTRL.
            05  WS-SESSION-SEQ          PIC 9(06) VALUE ZERO.
-           05  WS-TXN-SEQ              PIC 9(06) VALUE ZERO.
+           05  WS-NEXT-NO              PIC 9(09) VALUE ZERO.
            05  WS-TERMINATE            PIC X(01) VALUE 'N'.
            05  WS-RETRY                PIC 9(01) VALUE ZERO.
            05  WS-MENU                 PIC X(01) VALUE SPACE.
@@ -158,9 +158,12 @@
        SS-START.
            ADD 1 TO WS-SESSION-SEQ
            PERFORM REFRESH-CLOCK
+      *    -- セッション ID も端末内で一意にする。端末 ID を前置すると
+      *    -- 12 桁に収まらず連番が落ちて、すべて同じ ID になっていた。
+           PERFORM NEXT-TXN-NO
            MOVE SPACES TO SESS-SESSION-ID
-           STRING CN-ATM-ID DELIMITED BY SIZE
-                  WS-SESSION-SEQ DELIMITED BY SIZE
+           STRING 'SES' DELIMITED BY SIZE
+                  WS-NEXT-NO DELIMITED BY SIZE
                INTO SESS-SESSION-ID
            END-STRING
            MOVE 'N'   TO SESS-AUTHENTICATED
@@ -478,11 +481,15 @@
       *================================================================
        START-TRANSACTION SECTION.
        ST-START.
-           ADD 1 TO WS-TXN-SEQ
            PERFORM REFRESH-CLOCK
+      *    -- 取引 ID は EJ の通番から採る。時刻 + セッション内連番で
+      *    -- 作ると、同じ秒に始まった別セッションの取引と衝突する。
+      *    -- 締めバッチが取引 ID で開始と終了を突き合わせるため、
+      *    -- 重複すると別の取引を不確定として誤検出する。
+           PERFORM NEXT-TXN-NO
            MOVE SPACES TO SESS-TXN-ID
-           STRING WS-CD-HHMMSS DELIMITED BY SIZE
-                  WS-TXN-SEQ   DELIMITED BY SIZE
+           STRING 'T' DELIMITED BY SIZE
+                  WS-NEXT-NO DELIMITED BY SIZE
                INTO SESS-TXN-ID
            END-STRING
            MOVE ZERO   TO SESS-TXN-FEE
@@ -500,6 +507,14 @@
       *    -- 入金のように手数料を出さない取引で空欄になってしまう。
            PERFORM RESOLVE-DAY-TYPE.
        ST-EXIT.
+           EXIT.
+
+       NEXT-TXN-NO SECTION.
+       NTN-START.
+           SET JRNL-FN-NEXT-TXN TO TRUE
+           CALL 'ATMJRNL' USING JRNL-PARM ATM-SESSION
+           MOVE JRNL-OUT-TXN-NO TO WS-NEXT-NO.
+       NTN-EXIT.
            EXIT.
 
        RESOLVE-DAY-TYPE SECTION.

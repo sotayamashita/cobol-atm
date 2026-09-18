@@ -3,7 +3,8 @@
 set -e
 cd "$(dirname "$0")"
 rm -f data/atmacct.dat data/atmcard.dat data/atmcash.dat data/atmjrnl.dat \
-  data/atmbank.dat data/atmfee.dat data/atmlimit.dat data/atmhol.dat
+  data/atmbank.dat data/atmfee.dat data/atmlimit.dat data/atmhol.dat \
+  data/atmclose.dat data/atmrpt.txt
 mkdir -p data
 ./bin/atmseed >/dev/null
 
@@ -43,6 +44,29 @@ echo "### 8. 営業日カレンダー (曜日区分・祝日・翌営業日)"
 
 echo "### 9. 全銀システムの経路判定"
 ./bin/zgntest
+
+echo "### 9b. 日次締め"
+# EJ と取引 ID が実行ごとに変わるので、件数と判定結果だけを見る。
+close_filter() { grep -E '不確定取引|現金差異|締め処理|\[[0-9]{4}\]|係員' || true; }
+
+echo "-- 正常な締め"
+./bin/atmday | close_filter
+
+echo "-- 同じ営業日に再実行 (二重実行の防止)"
+./bin/atmday | close_filter
+
+echo "-- 取引の終了レコードを落として再締め (不確定取引の検出)"
+python3 - <<'PY'
+p = "data/atmjrnl.dat"
+lines = open(p, encoding="utf-8").read().splitlines()
+out = [x for x in lines if not (len(x) > 57 and x[55] == "E" and x[56:58] == "WD")]
+open(p, "w", encoding="utf-8").write("\n".join(out) + "\n")
+c = "data/atmclose.dat"
+d = open(c, "rb").read()
+open(c, "wb").write(d.replace(b"20260918", b"20260917", 1))
+PY
+./bin/atmday | close_filter
+grep -oE '\[(PN|ZU|CD|RF)\] [^ ]+' data/atmrpt.txt || true
 
 echo "### 10. 手数料マスタ (曜日区分 × 時間帯 × カード区分)"
 sort data/atmfee.dat

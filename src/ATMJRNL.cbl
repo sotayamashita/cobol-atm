@@ -28,6 +28,10 @@
        01  WS-JRNL-STATUS              PIC X(02) VALUE '00'.
        01  WS-SEQ                      PIC 9(09) VALUE ZERO.
        01  WS-OPENED                   PIC X(01) VALUE 'N'.
+      *    -- 走査用の状態。追記用 (WS-OPENED) とは別に持つ。同じ FD を
+      *    -- EXTEND と INPUT で同時に開けないため、状態を共用すると
+      *    -- どちらのモードで開いているか判別できなくなる。
+       01  WS-SCANNING                 PIC X(01) VALUE 'N'.
        01  WS-IDX                      PIC 9(02) VALUE ZERO.
        COPY 'ATMCONST.cpy'.
        COPY 'RETCODE.cpy'.
@@ -45,6 +49,10 @@
                WHEN JRNL-FN-OPEN    PERFORM OPEN-JOURNAL
                WHEN JRNL-FN-WRITE   PERFORM WRITE-JOURNAL
                WHEN JRNL-FN-CLOSE   PERFORM CLOSE-JOURNAL
+               WHEN JRNL-FN-SCAN-OPEN   PERFORM SCAN-OPEN-JOURNAL
+               WHEN JRNL-FN-SCAN-NEXT   PERFORM SCAN-NEXT-JOURNAL
+               WHEN JRNL-FN-SCAN-CLOSE  PERFORM SCAN-CLOSE-JOURNAL
+               WHEN JRNL-FN-NEXT-TXN    PERFORM NEXT-TXN-NO
                WHEN OTHER           MOVE RC-FATAL TO JRNL-OUT-RETCODE
            END-EVALUATE
            GOBACK.
@@ -55,6 +63,13 @@
        OPEN-JOURNAL SECTION.
        OPEN-J-START.
            IF WS-OPENED = 'Y'
+               GO TO OPEN-J-EXIT
+           END-IF
+
+      *    -- 走査中は同じ FD が INPUT で開いている。ここで EXTEND を
+      *    -- 重ねると走査が壊れるので、呼出順序の誤りとして弾く。
+           IF WS-SCANNING = 'Y'
+               MOVE RC-FATAL TO JRNL-OUT-RETCODE
                GO TO OPEN-J-EXIT
            END-IF
 
@@ -130,6 +145,24 @@
        WRITE-J-EXIT.
            EXIT.
 
+      *----------------------------------------------------------------
+      * 取引通番の払出し。EJ の通番は OPEN 時に既存レコードから復元
+      * されるので、電源断や再起動をまたいでも重複しない。
+      * ここでは「次に書かれる通番」を覗くだけで消費はしない。取引は
+      * 必ず開始レコードを書くため、次の取引はより大きい値を得る。
+      *----------------------------------------------------------------
+       NEXT-TXN-NO SECTION.
+       NTN-START.
+           IF WS-OPENED NOT = 'Y'
+               PERFORM OPEN-JOURNAL
+               IF JRNL-OUT-RETCODE NOT = RC-OK
+                   GO TO NTN-EXIT
+               END-IF
+           END-IF
+           COMPUTE JRNL-OUT-TXN-NO = WS-SEQ + 1.
+       NTN-EXIT.
+           EXIT.
+
        CLOSE-JOURNAL SECTION.
        CLOSE-J-START.
            IF WS-OPENED = 'Y'
@@ -137,6 +170,81 @@
                MOVE 'N' TO WS-OPENED
            END-IF.
        CLOSE-J-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * SCANOPEN : 締めバッチが EJ を先頭から読むために開く
+      *   走査中に追記が起きるとファイルが伸び続けて終端が定まらない
+      *   ため、追記用に開いていれば先に閉じて追記経路を塞ぐ。締め
+      *   バッチは端末停止中に走るので、両方が同時に必要になることは
+      *   ない。WS-SEQ は保持したままなので、走査後に再度 OPEN すれば
+      *   シーケンスはそのまま継続できる。
+      *----------------------------------------------------------------
+       SCAN-OPEN-JOURNAL SECTION.
+       SCAN-O-START.
+           IF WS-SCANNING = 'Y'
+               GO TO SCAN-O-EXIT
+           END-IF
+
+           PERFORM CLOSE-JOURNAL
+
+           MOVE 'N' TO JRNL-OUT-EOF
+           MOVE SPACES TO JRNL-OUT-RECORD
+           OPEN INPUT JRNL-FILE
+      *    -- EJ 未作成 (35) は「走査対象 0 件」であり障害ではない。
+      *    -- 初日の締めを異常終了させないため即 EOF として扱う。
+           EVALUATE TRUE
+               WHEN WS-JRNL-STATUS = '00' OR WS-JRNL-STATUS = '05'
+                   MOVE 'Y' TO WS-SCANNING
+               WHEN WS-JRNL-STATUS = '35'
+                   MOVE 'Y' TO JRNL-OUT-EOF
+               WHEN OTHER
+                   MOVE RC-IO-ERROR TO JRNL-OUT-RETCODE
+           END-EVALUATE.
+       SCAN-O-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * SCANNEXT : 1 レコード読んで呼出元に返す
+      *----------------------------------------------------------------
+       SCAN-NEXT-JOURNAL SECTION.
+       SCAN-N-START.
+           MOVE SPACES TO JRNL-OUT-RECORD
+      *    -- 未オープン / EJ 無しの場合も EOF を返すだけにする。
+      *    -- 呼出元は EOF 判定だけでループを終えられる。
+           IF WS-SCANNING NOT = 'Y'
+               MOVE 'Y' TO JRNL-OUT-EOF
+               GO TO SCAN-N-EXIT
+           END-IF
+
+           MOVE 'N' TO JRNL-OUT-EOF
+           READ JRNL-FILE
+               AT END
+                   MOVE 'Y' TO JRNL-OUT-EOF
+               NOT AT END
+                   MOVE JRNL-RECORD TO JRNL-OUT-RECORD
+           END-READ
+
+           IF JRNL-OUT-EOF NOT = 'Y' AND WS-JRNL-STATUS NOT = '00'
+               MOVE RC-IO-ERROR TO JRNL-OUT-RETCODE
+           END-IF.
+       SCAN-N-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * SCANCLOS : 走査を終える。追記用の再オープンは行わない
+      *   (再開の要否を決めるのは呼出元であり、ここで勝手に EXTEND で
+      *    開くと締め処理中に EJ が伸びうるため)
+      *----------------------------------------------------------------
+       SCAN-CLOSE-JOURNAL SECTION.
+       SCAN-C-START.
+           IF WS-SCANNING = 'Y'
+               CLOSE JRNL-FILE
+               MOVE 'N' TO WS-SCANNING
+           END-IF
+           MOVE 'Y' TO JRNL-OUT-EOF
+           MOVE SPACES TO JRNL-OUT-RECORD.
+       SCAN-C-EXIT.
            EXIT.
 
        END PROGRAM ATMJRNL.

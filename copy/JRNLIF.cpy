@@ -15,6 +15,11 @@
                88  JRNL-FN-SCAN-OPEN           VALUE 'SCANOPEN'.
                88  JRNL-FN-SCAN-NEXT           VALUE 'SCANNEXT'.
                88  JRNL-FN-SCAN-CLOSE          VALUE 'SCANCLOS'.
+      *        -- 取引通番の採番。EJ の通番は再起動をまたいで単調増加
+      *        -- するため、端末内で一意な番号の出どころとして使える。
+      *        -- 時刻とセッション内連番で作ると、プロセスをまたいで
+      *        -- 衝突する (連番がセッションごとに 1 へ戻るため)。
+               88  JRNL-FN-NEXT-TXN            VALUE 'NEXTTXN '.
            05  JRNL-IN-PHASE           PIC X(01).
                88  JRNL-PH-START               VALUE 'S'.
                88  JRNL-PH-END                 VALUE 'E'.
@@ -26,3 +31,4 @@
       *    -- 走査で読んだ 1 件。SCANNEXT が終端に達したら 'Y'
            05  JRNL-OUT-EOF            PIC X(01).
            05  JRNL-OUT-RECORD         PIC X(200).
+           05  JRNL-OUT-TXN-NO         PIC 9(09).

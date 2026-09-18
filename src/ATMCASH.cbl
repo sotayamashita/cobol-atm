@@ -79,6 +79,8 @@
                WHEN CASH-FN-DISPENSE  PERFORM DO-DISPENSE
                WHEN CASH-FN-ACCEPT    PERFORM DO-ACCEPT
                WHEN CASH-FN-CLOSE     PERFORM CLOSE-CASH
+               WHEN CASH-FN-THEORY    PERFORM REPORT-THEORY
+               WHEN CASH-FN-SETTLE    PERFORM DO-SETTLE
                WHEN OTHER
                    MOVE RC-FATAL TO CASH-OUT-RETCODE
            END-EVALUATE
@@ -300,6 +302,58 @@
            PERFORM REFRESH-CASSETTE-STATUS
            PERFORM SAVE-CASSETTE.
        ACC-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * THEORY : 帳簿上あるべき枚数と当日の増減を返す。照会のみで在庫は
+      *          一切変更しない (SAVE-CASSETTE を呼ばない)。
+      *   実査枚数との突合と過不足判定は締めバッチ側の責務とする。
+      *   実査値の入力元・許容差・再計数の運用ルールは現場ごとに異なり、
+      *   ここに持ち込むと現金機構の制御と締め運用が癒着するため、
+      *   このモジュールは「帳簿がどうなっているか」だけを答える。
+      *   払出可能枚数 (COMPUTE-AVAILABLE) ではなく CASH-NOTE-CNT を
+      *   そのまま返すのは、障害中カセットの紙幣も物理的には残っており
+      *   帳簿上は在庫だからである。
+      *----------------------------------------------------------------
+       REPORT-THEORY SECTION.
+       THR-START.
+           PERFORM LOAD-CASSETTE
+           IF CASH-OUT-RETCODE NOT = RC-OK
+               GO TO THR-EXIT
+           END-IF
+
+           PERFORM VARYING WS-C FROM 1 BY 1 UNTIL WS-C > CN-CASSETTE-CNT
+               MOVE CASH-DENOM(WS-C)    TO CASH-TH-DENOM(WS-C)
+               MOVE CASH-NOTE-CNT(WS-C) TO CASH-TH-CNT(WS-C)
+           END-PERFORM
+
+           MOVE CASH-DISPENSED-TODAY TO CASH-OUT-DISPENSED
+           MOVE CASH-DEPOSITED-TODAY TO CASH-OUT-DEPOSITED
+           MOVE CASH-BUSINESS-DATE   TO CASH-OUT-BUSINESS-DATE.
+       THR-EXIT.
+           EXIT.
+
+      *----------------------------------------------------------------
+      * SETTLE : 当日計をクリアし営業日を繰り越す。
+      *   枚数 (CASH-NOTE-CNT) は触らない。締めで実際の紙幣は動かず、
+      *   在庫は翌営業日にそのまま引き継がれるため。
+      *   状態は枚数据置きでも整合させるべき値なので、既存の
+      *   REFRESH-CASSETTE-STATUS を通してから書き戻す。
+      *----------------------------------------------------------------
+       DO-SETTLE SECTION.
+       STL-START.
+           PERFORM LOAD-CASSETTE
+           IF CASH-OUT-RETCODE NOT = RC-OK
+               GO TO STL-EXIT
+           END-IF
+
+           MOVE ZERO TO CASH-DISPENSED-TODAY
+                        CASH-DEPOSITED-TODAY
+           MOVE SESS-BUSINESS-DATE TO CASH-BUSINESS-DATE
+
+           PERFORM REFRESH-CASSETTE-STATUS
+           PERFORM SAVE-CASSETTE.
+       STL-EXIT.
            EXIT.
 
       *----------------------------------------------------------------

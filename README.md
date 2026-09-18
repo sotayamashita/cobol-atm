@@ -16,6 +16,10 @@
 | `src/ATMACCT.cbl` | 口座マスタアクセス。排他制御と楽観ロック |
 | `src/ATMCASH.cbl` | 紙幣払出。金種計算 (有界ナップサック DP) と在庫 |
 | `src/ATMJRNL.cbl` | 電子ジャーナル出力 (追記専用) |
+| `src/ATMCAL.cbl` | 営業日カレンダー。曜日区分・祝日・翌営業日 |
+| `src/ATMZGN.cbl` | 全銀システム接続。コアタイム / モアタイムの経路判定 |
+| `src/ATMDAY.cbl` | 日次締めバッチ。不確定取引の抽出と現金突合 |
+| `src/ATMRPT.cbl` | 締めレポートの整形出力 |
 | `src/ATMSEED.cbl` | 試験用マスタの初期作成 |
 | `copy/*.cpy` | レコード定義とモジュール間インタフェース |
 
@@ -30,6 +34,8 @@ brew install gnu-cobol
 ```bash
 make seed   # マスタを初期化
 make run    # ATM を起動
+make close  # 日次締めバッチを流す (端末停止中に実行する)
+make test   # 回帰テスト
 ```
 
 テスト用カード: `4900123456780001` / 暗証番号 `1234`

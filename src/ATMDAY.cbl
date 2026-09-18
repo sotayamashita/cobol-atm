@@ -83,10 +83,16 @@
            05  WS-OVERFLOW             PIC X(01) VALUE 'N'.
            05  WS-ABORT                PIC X(01) VALUE 'N'.
            05  WS-ACTION               PIC X(01) VALUE 'N'.
-      *    -- 実査枚数と、それが入力されたか。入力経路が無い間は
-      *    -- 'N' のままで、突合そのものを行わない。
+      *    -- 実査枚数と、それが揃ったか。揃わない間は 'N' のままで、
+      *    -- 突合そのものを行わない。
            05  WS-COUNTED              PIC X(01) VALUE 'N'.
            05  WS-IN-COUNT OCCURS 4 TIMES PIC 9(05).
+      *    -- 実枚数が入力されたカセットの本数。ゼロ枚と未計数を
+      *    -- 区別するために、値とは別に数える。
+           05  WS-GIVEN-CNT            PIC S9(04) COMP VALUE ZERO.
+           05  WS-IN-LINE              PIC X(12) VALUE SPACES.
+           05  WS-NUM-SIGNED           PIC S9(10) VALUE ZERO.
+           05  WS-ED-DENOM             PIC ZZ,ZZ9.
       *    -- 当日の現金増減。CASH-PARM は呼出のたびに上書きされる
       *    -- 引数域なので、後で帳票に出す値はここへ退避する。
            05  WS-DISPENSED            PIC S9(13)V99 VALUE ZERO.
@@ -403,20 +409,80 @@
            EXIT.
 
       *----------------------------------------------------------------
-      * 実査枚数の取得。係員が装置から数えた枚数を入力する経路が
-      * まだ無いので、未入力のまま返す。
+      * 実査枚数の取得。係員が数えた枚数をカセットごとに受け取る。
       *
-      * 帳簿値をそのまま実査値として埋めてはいけない。比較が必ず
-      * 一致して差異ゼロになり、実査していないのに「実施して問題
-      * なし」と読める帳票が出てしまう。未実施は未実施として残す。
+      * 帳簿枚数を見せてから入力させてはいけない。示された数をそのまま
+      * 打ち込めてしまい、実査が帳簿の書き写しになる。突合は帳簿と独立に
+      * 数えて初めて意味を持つので、ここでは金種しか示さない。
       *
-      * 係員操作パネルを作る際は、ここで入力値を受け取って
-      * WS-COUNTED に 'Y' を立てれば、以降の突合が有効になる。
+      * 帳簿値をそのまま実査値として埋めてもいけない。比較が必ず一致して
+      * 差異ゼロになり、実査していないのに「実施して問題なし」と読める
+      * 帳票が出てしまう。未実施は未実施として残す。
+      *
+      * 一部のカセットだけ数えた状態は実査ではない。数えていないカセット
+      * の差異を見落としたまま「実施」と記録すると、次に数えたときの差異
+      * がどの日のものか追えなくなる。全本揃って初めて 'Y' を立てる。
       *----------------------------------------------------------------
        READ-COUNTED-NOTES SECTION.
        RCN-START.
-           MOVE 'N' TO WS-COUNTED.
+           MOVE 'N'  TO WS-COUNTED
+           MOVE ZERO TO WS-GIVEN-CNT
+
+           DISPLAY ' '
+           DISPLAY '  現金実査: カセットごとの実枚数を入力してください'
+                   ' (空のまま Enter で未計数)。'
+
+           PERFORM VARYING WS-I FROM 1 BY 1
+                   UNTIL WS-I > CN-CASSETTE-CNT
+               MOVE ZERO TO WS-IN-COUNT(WS-I)
+               MOVE CASH-TH-DENOM(WS-I) TO WS-ED-DENOM
+               DISPLAY '    ' WS-ED-DENOM ' 円券の実枚数:'
+      *        -- 入力前に必ず消す。入力が尽きた場合 ACCEPT は項目を
+      *        -- 変えないため、前のカセットの入力が残る。
+               MOVE SPACES TO WS-IN-LINE
+               ACCEPT WS-IN-LINE
+               IF WS-IN-LINE NOT = SPACES
+                   PERFORM PARSE-COUNTED-NOTES
+               END-IF
+           END-PERFORM
+
+           PERFORM JUDGE-COUNT-COMPLETE.
        RCN-EXIT.
+           EXIT.
+
+       PARSE-COUNTED-NOTES SECTION.
+       PCN-START.
+      *    -- TEST-NUMVAL は数値として解釈できれば 0 を返す
+           IF FUNCTION TEST-NUMVAL (WS-IN-LINE) NOT = ZERO
+               DISPLAY '      枚数が正しくありません。未計数とします。'
+               GO TO PCN-EXIT
+           END-IF
+
+      *    -- 符号付きで受けてから判定する。符号なし項目へ直接受けると、
+      *    -- 負数が絶対値に化けて素通りする。
+           COMPUTE WS-NUM-SIGNED = FUNCTION NUMVAL (WS-IN-LINE)
+           IF WS-NUM-SIGNED < ZERO OR WS-NUM-SIGNED > 99999
+               DISPLAY '      枚数が範囲外です。未計数とします。'
+               GO TO PCN-EXIT
+           END-IF
+
+           MOVE WS-NUM-SIGNED TO WS-IN-COUNT(WS-I)
+           ADD 1 TO WS-GIVEN-CNT.
+       PCN-EXIT.
+           EXIT.
+
+       JUDGE-COUNT-COMPLETE SECTION.
+       JCC-START.
+           EVALUATE TRUE
+               WHEN WS-GIVEN-CNT = ZERO
+                   DISPLAY '  現金実査: 未実施'
+               WHEN WS-GIVEN-CNT < CN-CASSETTE-CNT
+                   DISPLAY '  現金実査: 未実施'
+                           ' (一部のカセットが未計数です)'
+               WHEN OTHER
+                   MOVE 'Y' TO WS-COUNTED
+           END-EVALUATE.
+       JCC-EXIT.
            EXIT.
 
       *================================================================
@@ -573,7 +639,7 @@
            IF WS-COUNTED = 'Y'
                DISPLAY '  現金差異  : ' WS-DIFF-CNT ' 件'
            ELSE
-               DISPLAY '  現金実査  : 未実施 (実査枚数の入力経路なし)'
+               DISPLAY '  現金実査  : 未実施 (突合していません)'
            END-IF
            IF WS-OVERFLOW = 'Y'
                DISPLAY '*** 検出件数が上限に達し、明細を打ち切りました。'

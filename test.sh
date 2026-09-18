@@ -49,7 +49,12 @@ echo "### 9. 全銀システムの経路判定"
 echo "### 9b. 日次締め"
 # EJ と取引 ID は実行ごとに変わるので、件数と判定結果だけを見る。
 # テスト 5 で暗証番号を 4321 に変えているので、以降はそれを使う。
-close_filter() { grep -E '不確定取引|現金差異|締め処理|EJ 退避|\[[0-9]{4}\]|係員' || true; }
+close_filter() {
+  grep -E '不確定取引|現金差異|締め処理|EJ 退避|現金実査|\[[0-9]{4}\]|係員' || true
+}
+
+# 締めは実査枚数を対話で受け取る。空入力 4 回で未計数 (未実施) になる。
+uncounted() { printf '\n\n\n\n'; }
 
 jrnl_rows() { wc -l <data/atmjrnl.dat | tr -d ' '; }
 arc_rows() { cat data/atmjrnl-*.dat 2>/dev/null | wc -l | tr -d ' '; }
@@ -65,7 +70,7 @@ open(p,'wb').write(d.replace(b'20260918', b'20260917', 1))
 
 echo "-- 正常な締め (EJ の退避を含む)"
 echo "   締め前の EJ: $(jrnl_rows) 行"
-./bin/atmday | close_filter
+uncounted | ./bin/atmday | close_filter
 echo "   締め後の EJ: $(jrnl_rows) 行 (退避して空になる)"
 echo "   退避先: $(arc_rows) 行"
 
@@ -74,11 +79,11 @@ printf '4900123456780001\n4321\n1\n9\n\n' | ./bin/atm >/dev/null 2>&1
 echo "   新規レコードの通番: $(cut -c1-9 data/atmjrnl.dat | head -1)"
 
 echo "-- 同じ営業日に再実行 (二重実行の防止)"
-./bin/atmday | close_filter
+uncounted | ./bin/atmday | close_filter
 
 echo "-- 既存の退避先を上書きしないか (当日分を失わない)"
 reopen_close_state
-./bin/atmday >/dev/null 2>&1
+uncounted | ./bin/atmday >/dev/null 2>&1
 echo "   退避先: $(arc_rows) 行 (増えも減りもしない)"
 
 echo "-- 取引の終了レコードを落として再締め (不確定取引の検出)"
@@ -90,7 +95,15 @@ out=[x for x in lines if not (len(x)>57 and x[55]=='E' and x[56:58]=='WD')]
 open(p,'w',encoding='utf-8').write(chr(10).join(out)+chr(10))
 "
 reopen_close_state
-./bin/atmday | close_filter
+uncounted | ./bin/atmday | close_filter
+grep -oE '\[(PN|ZU|CD|RF)\] [^ ]+' data/atmrpt.txt || true
+
+echo "-- 現金実査を入力すると突合が有効になる"
+# 帳簿と違う枚数を入れて差異 (CD) を出す。1 本でも未計数なら未実施。
+reopen_close_state
+printf '1\n' | ./bin/atmday | close_filter
+reopen_close_state
+printf '1\n2\n3\n4\n' | ./bin/atmday | close_filter
 grep -oE '\[(PN|ZU|CD|RF)\] [^ ]+' data/atmrpt.txt || true
 
 echo "### 9c. カセット装填"

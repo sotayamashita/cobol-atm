@@ -321,7 +321,7 @@
                    INTO WS-LINE
            ELSE
                STRING '  現金実査    : 未実施 '
-                      '(実査枚数の入力経路が無いため突合していません)'
+                      '(実枚数が入力されなかったため突合していません)'
                    DELIMITED BY SIZE INTO WS-LINE
            END-IF
            PERFORM WRITE-LINE

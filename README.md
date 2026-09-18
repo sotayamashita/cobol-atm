@@ -35,7 +35,7 @@ brew install gnu-cobol
 ```bash
 make seed   # マスタを初期化
 make run    # ATM を起動
-make close  # 日次締めバッチを流す (端末停止中に実行する)
+make close  # 日次締めバッチを流す (端末停止中に実行する / 実査枚数を入力)
 make load   # カセット装填バッチを流す (端末停止中に実行する)
 make purge  # 退避済み EJ を保存年限で整理する (保存年限は実行時に指定)
 make test   # 回帰テスト
